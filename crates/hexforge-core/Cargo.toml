@@ -1,0 +1,15 @@
+[package]
+name = "hexforge-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+blake3.workspace = true
+
+[dev-dependencies]

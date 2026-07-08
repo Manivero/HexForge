@@ -1,0 +1,19 @@
+[package]
+name = "hexforge-ops"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hexforge-core = { path = "../hexforge-core" }
+serde.workspace = true
+serde_json.workspace = true
+base64 = "0.22"
+hex = "0.4"
+sha2 = "0.10"
+md-5 = "0.10"
+digest = "0.10"
+inventory = "0.3"
+
+[dev-dependencies]

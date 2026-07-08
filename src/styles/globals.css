@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Токены — единственное место, где определены сырые значения цвета.
+ * Компоненты никогда не читают --neutral-* напрямую, только семантические
+ * алиасы (--surface-*, --text-*...). См. 06-DESIGN-SYSTEM.md.
+ */
+
+:root {
+  /* Нейтральная шкала — холодный (slightly blue-shifted) серый, 12 ступеней */
+  --neutral-1: #0a0b0d;
+  --neutral-2: #101216;
+  --neutral-3: #16181d;
+  --neutral-4: #1c1f26;
+  --neutral-5: #23262f;
+  --neutral-6: #2b2f3a;
+  --neutral-7: #363b47;
+  --neutral-8: #454b59;
+  --neutral-9: #5b6272;
+  --neutral-10: #7c8394;
+  --neutral-11: #a7adba;
+  --neutral-12: #e8eaee;
+
+  --accent-3: #17233d;
+  --accent-9: #3b82f6;
+  --accent-10: #5b9bfa;
+
+  --red-9: #ef4444;
+  --amber-9: #f59e0b;
+
+  /* Тёмная тема — дефолт (см. 06-DESIGN-SYSTEM.md §1) */
+  --surface-0: var(--neutral-1);
+  --surface-1: var(--neutral-2);
+  --surface-2: var(--neutral-4);
+  --surface-overlay: var(--neutral-3);
+
+  --border-default: var(--neutral-6);
+  --border-subtle: var(--neutral-5);
+  --border-focus: var(--accent-9);
+
+  --text-primary: var(--neutral-12);
+  --text-secondary: var(--neutral-11);
+  --text-muted: var(--neutral-9);
+  --text-inverted: var(--neutral-1);
+
+  --status-idle: var(--neutral-9);
+  --status-running: var(--accent-9);
+  --status-error: var(--red-9);
+  --status-stale: var(--amber-9);
+
+  --grid-dot: var(--neutral-6);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--border-subtle);
+  --shadow-overlay: 0 16px 48px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-default);
+
+  --motion-duration-fast: 150ms;
+  --motion-duration-base: 200ms;
+  --motion-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Светлая тема — вторичная, включается через <html class="light"> */
+.light {
+  --surface-0: #f7f8fa;
+  --surface-1: #ffffff;
+  --surface-2: #eef0f3;
+  --surface-overlay: #ffffff;
+
+  --border-default: #d8dce2;
+  --border-subtle: #e4e7ec;
+
+  --text-primary: #14161a;
+  --text-secondary: #454b59;
+  --text-muted: #7c8394;
+  --text-inverted: #ffffff;
+
+  --grid-dot: #d8dce2;
+
+  --shadow-panel: 0 1px 2px rgba(20, 22, 26, 0.06), 0 0 0 1px var(--border-subtle);
+  --shadow-overlay: 0 16px 48px rgba(20, 22, 26, 0.16), 0 0 0 1px var(--border-default);
+}
+
+* {
+  border-color: var(--border-default);
+}
+
+body {
+  margin: 0;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  /* Плотный UI, не consumer-app: подавляем стандартное сглаживание "жирного" текста macOS */
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  user-select: none;
+}
+
+/* Текстовые поля и превью-контент — единственные места, где выделение текста разрешено */
+input,
+textarea,
+[data-selectable] {
+  user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--neutral-6);
+  border-radius: var(--radius-sm);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

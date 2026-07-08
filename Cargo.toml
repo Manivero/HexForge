@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hexforge-core",
+    "crates/hexforge-ops",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["HexForge Contributors"]
+license = "MIT"
+rust-version = "1.78"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+blake3 = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "unwind" # обязателен unwind, а не abort: паника в plugin-host обязана изолироваться, а не убивать процесс (NFR-9)
