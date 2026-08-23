@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- CSP дублирует tauri.conf.json app.security.csp на случай dev-режима вне Tauri -->
+    <!-- CSP в dev-режиме вне Tauri не задаётся: Tauri инжектирует CSP из
+         tauri.conf.json (app.security.csp) с nonce при рантайме. Статический
+         meta-CSP здесь сломал бы HMR (ws: connect-src) и Vite inline-скрипты. -->
     <title>HexForge</title>
   </head>
   <body>

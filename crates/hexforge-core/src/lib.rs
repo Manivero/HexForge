@@ -17,7 +17,7 @@ pub mod registry;
 pub mod transform;
 
 pub use graph::{Graph, GraphError, NodeId, OperationNode};
-pub use history::{Snapshot, SnapshotId};
+pub use history::{History, Snapshot, SnapshotId};
 pub use registry::TransformRegistry;
 pub use transform::{
     ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,

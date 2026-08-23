@@ -48,21 +48,39 @@ impl Snapshot {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct History {
     pub snapshots: std::collections::HashMap<SnapshotId, Snapshot>,
+    /// Порядок записи снапшотов — единственный источник детерминированного
+    /// порядка для `list_snapshots` (итерация HashMap неупорядочена).
+    /// Не является структурой ветвления: ветвление выражено только полями
+    /// `parent`, `order` — хронология журнала.
+    pub order: Vec<SnapshotId>,
     pub current: Option<SnapshotId>,
 }
 
 impl History {
     pub fn record(&mut self, snapshot: Snapshot) {
-        self.current = Some(snapshot.id);
-        self.snapshots.insert(snapshot.id, snapshot);
+        let id = snapshot.id;
+        self.current = Some(id);
+        // Повторная запись того же id — это замена существующего снапшота,
+        // а не новое событие: в `order` он дублироваться не должен.
+        if self.snapshots.insert(id, snapshot).is_none() {
+            self.order.push(id);
+        }
     }
 
     /// Путь от корня до данного снапшота — последовательность операций,
     /// применение которых воспроизводит его состояние с нуля.
+    /// Защищена от зацикливания: некорректное состояние с циклом в `parent`
+    /// (возможно только при ручном конструировании/повреждении данных, т.к.
+    /// `record` сам ничего не проверяет) обрывается на первом повторном
+    /// посещении вместо бесконечного цикла.
     pub fn lineage(&self, id: SnapshotId) -> Vec<&Snapshot> {
         let mut chain = Vec::new();
+        let mut visited = std::collections::HashSet::new();
         let mut cursor = Some(id);
         while let Some(current_id) = cursor {
+            if !visited.insert(current_id) {
+                break;
+            }
             let Some(snap) = self.snapshots.get(&current_id) else {
                 break;
             };
@@ -71,6 +89,15 @@ impl History {
         }
         chain.reverse();
         chain
+    }
+
+    /// Снапшоты в порядке записи (`order`), пропуская отсутствующие id —
+    /// используется IPC-слоем для стабильного рендера списка истории.
+    pub fn ordered_snapshots(&self) -> Vec<&Snapshot> {
+        self.order
+            .iter()
+            .filter_map(|id| self.snapshots.get(id))
+            .collect()
     }
 }
 
@@ -148,5 +175,65 @@ mod tests {
         assert_eq!(lineage.len(), 2);
         assert_eq!(lineage[0].id, root_id);
         assert_eq!(lineage[1].id, child_id);
+    }
+
+    #[test]
+    fn lineage_terminates_on_parent_cycle() {
+        // Повреждённое/некорректно сконструированное состояние: a.parent = b,
+        // b.parent = a. `lineage` обязан завершиться конечным обходом, а не
+        // зациклиться навсегда.
+        let mut history = History::default();
+        let a_id = Uuid::new_v4();
+        let b_id = Uuid::new_v4();
+
+        let mut a = snapshot_for_test(a_id, None);
+        a.parent = Some(b_id);
+        let b = snapshot_for_test(b_id, Some(a_id));
+        history.record(a);
+        history.record(b);
+
+        let lineage = history.lineage(a_id);
+        assert!(!lineage.is_empty());
+        assert!(lineage.len() <= 2, "cycle must terminate the walk");
+    }
+
+    #[test]
+    fn lineage_of_unknown_id_is_empty() {
+        let history = History::default();
+        assert!(history.lineage(Uuid::new_v4()).is_empty());
+    }
+
+    #[test]
+    fn record_maintains_insertion_order() {
+        let mut history = History::default();
+        let first = Uuid::new_v4();
+        let second = Uuid::new_v4();
+        history.record(snapshot_for_test(first, None));
+        history.record(snapshot_for_test(second, Some(first)));
+
+        assert_eq!(history.order, vec![first, second]);
+        let ordered: Vec<SnapshotId> =
+            history.ordered_snapshots().iter().map(|s| s.id).collect();
+        assert_eq!(ordered, vec![first, second]);
+
+        // Перезапись существующего id не должна дублировать запись в order.
+        history.record(snapshot_for_test(first, None));
+        assert_eq!(history.order, vec![first, second]);
+        assert_eq!(history.snapshots.len(), 2);
+        assert_eq!(history.current, Some(first));
+    }
+
+    /// Минимальный валидный снапшот для тестов структуры History.
+    fn snapshot_for_test(id: SnapshotId, parent: Option<SnapshotId>) -> Snapshot {
+        Snapshot {
+            id,
+            parent,
+            node_id: NodeId::new_v4(),
+            operation_id: "encoding.base64.encode".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            input_content_hash: blake3::hash(b"input"),
+            output_content_hash: Some(blake3::hash(b"output")),
+        }
     }
 }

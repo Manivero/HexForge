@@ -14,17 +14,23 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
 6. [`docs/06-DESIGN-SYSTEM.md`](docs/06-DESIGN-SYSTEM.md) — design tokens (см. `tailwind.config.ts`)
 7. [`docs/07-PROJECT-SCAFFOLD.md`](docs/07-PROJECT-SCAFFOLD.md) — структура проекта + статус верификации
 
-## Статус реализации (Этап 2, срез 1)
+## Статус реализации (Этап 2)
 
-- ✅ `hexforge-core` + `hexforge-ops`: компилируются, 13/13 unit-тестов зелёные
-  (Base64, Hex, ROT13, MD5, SHA-256; topo-sort/cycle-detection/fork-merge графа)
+- ✅ `hexforge-core` + `hexforge-ops`: компилируются, unit-тесты зелёные
+  (Base64, Hex, ROT13, MD5, SHA-256; topo-sort/cycle-detection/fork-merge графа;
+  lineage-обход истории с защитой от parent-циклов)
 - ✅ React/TS strict фронтенд: `tsc --noEmit` чисто, `vite build` собирается,
   ESLint без замечаний
 - ✅ Command Palette (⌘K) — первый и центральный UI-компонент, подключён к
   живому реестру операций через типизированный IPC-слой
-- ⏳ `src-tauri` (мост Rust↔WebView): написан по API Tauri v2, компиляция
-  требует Rust ≥ 1.85 — см. ограничения sandbox-окружения в
-  `docs/07-PROJECT-SCAFFOLD.md`
+- ✅ `src-tauri` (мост Rust↔WebView): workspace собирается целиком
+  (`cargo build --workspace`), иконки сгенерированы (`src-tauri/icons/`),
+  `run_node` пишет Snapshot в Time-Travel History (blake3 content-hash'и),
+  `list_snapshots` возвращает реальный журнал; юнит-тесты командного слоя —
+  зелёные
+- ⏳ Заглушки контракта: `cancel_node` (ждёт async-планировщик
+  `hexforge-stream`), `list_plugins` (ждёт `hexforge-plugin-host`),
+  export/import recipe
 
 ## Быстрый старт
 
@@ -35,9 +41,10 @@ npm run dev          # фронтенд отдельно, http://localhost:1420
 npm run tauri dev    # полное нативное приложение
 ```
 
+Проверки: `npm run lint`, `npm run build`, `cargo test --workspace`.
+
 ## Дальше по плану MVP (см. PRD §3)
 
 `hexforge-stream` (chunked-планировщик, N-арные merge-узлы) →
 `GraphCanvas`/`OperationNode` (визуализация DAG) → `HexViewer` (virtualized) →
-`History`/Time-Travel запись при каждом `run_node` → `hexforge-plugin-host`
-(Wasmtime sandbox).
+Time-Travel UI поверх History → `hexforge-plugin-host` (Wasmtime sandbox).

@@ -49,12 +49,13 @@ hexforge/
 
 | Компонент | Статус | Верификация |
 |---|---|---|
-| `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test` — 6 тестов (topo sort, cycle detection, fork/merge, lineage) |
-| `hexforge-ops` (Base64, Hex, ROT13, MD5, SHA-256) | ✅ | `cargo test` — 7 тестов (roundtrip, известные векторы, невалидный вход) |
+| `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort, cycle detection, fork/merge, lineage + защита от parent-циклов, порядок записи истории) |
+| `hexforge-ops` (Base64, Hex, ROT13, MD5, SHA-256) | ✅ | `cargo test -p hexforge-ops` — 7 тестов (roundtrip, известные векторы, невалидный вход) |
 | React + TS strict фронтенд | ✅ | `tsc --noEmit` — 0 ошибок; `vite build` — успешный production-бандл |
-| ESLint | ✅ | `eslint src --ext ts,tsx` — 0 замечаний |
-| Tauri command `greet` + полный IPC-слой (11 команд) | ✅ (код) | Компиляция `src-tauri` требует Rust ≥ 1.85 (edition2024 у транзитивных зависимостей Tauri v2) — недоступно в текущей sandbox-версии (rustc 1.75 из apt). Код написан по официальному API Tauri v2 и не содержит архитектурных отступлений от `crates/`; компиляция должна быть проверена на целевой машине разработчика с актуальным `rustup`. |
+| ESLint | ✅ | `eslint . --ext ts,tsx --max-warnings 0` — 0 замечаний (`require()` в tailwind.config.ts заменён на ESM-import) |
+| Tauri command `greet` + полный IPC-слой (11 команд) | ✅ | `cargo build --workspace` проходит; иконки сгенерированы через `npx tauri icon` в `src-tauri/icons/` |
 | Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
+| Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 10 unit-тестов командного слоя/состояния зелёные |
 
 ## Как запустить локально
 
@@ -95,17 +96,20 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` (core+ops) — 13/13
-зелёных, `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` —
-успешная сборка.
+Все изменения перепроверены: `cargo test --workspace` — 26/26 зелёных
+(core 9, ops 7, tauri 10), `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний,
+`vite build` — успешная сборка.
 1. `run_node` в `commands.rs` — наивный рекурсивный исполнитель одного пути
    графа без мемоизации и без chunked-стриминга; полноценный планировщик
-   (`hexforge-stream`) — следующий пункт плана MVP из PRD.
-2. `list_snapshots`/`list_plugins` — контрактные заглушки (пустой список),
-   пока не реализованы `History`-запись при `run_node` и
-   `hexforge-plugin-host` (Wasmtime) соответственно.
-3. Иконки приложения (`src-tauri/icons/*`) не сгенерированы — перед первым
-   `tauri build` выполнить `npm run tauri icon <path-to-1024px-logo.png>`.
+   (`hexforge-stream`) — следующий пункт плана MVP из PRD. `previewOnly`
+   принимается по контракту, но режимы пока не различаются (downstream в MVP
+   не пересчитывается вовсе).
+2. `list_plugins`, `cancel_node`, `jump_to_snapshot` и export/import recipe —
+   контрактные заглушки; `list_snapshots` с Этапа 2 возвращает реальный
+   журнал истории (write-through при `run_node`).
+3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
+   `npx tauri icon <source.png>`; для смены брендинга повторить команду с
+   новым исходником ≥ 1024×1024.
 4. `export_recipe`/`import_recipe`/`import_cyberchef_recipe` специфицированы
    в `ipc-contract.ts`, но не имеют Rust-реализации — явно помечено в
    комментариях контракта.

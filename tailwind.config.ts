@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
 
 // Источник истины для токенов дизайн-системы (см. 06-DESIGN-SYSTEM.md).
 // Компоненты обязаны ссылаться на семантические классы (bg-surface-1,
@@ -92,5 +93,5 @@ export default {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [tailwindcssAnimate],
 } satisfies Config;

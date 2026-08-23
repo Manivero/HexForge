@@ -291,6 +291,12 @@ pub fn set_graph(req: SetGraphRequest, state: State<AppState>) -> HexForgeResult
 #[serde(rename_all = "camelCase")]
 pub struct RunNodeRequest {
     pub node_id: String,
+    /// FR-1.6 (`previewOnly=true`: downstream не пересчитывается). MVP-исполнитель
+    /// и так никогда не трогает downstream — выполняется только запрошенный узел
+    /// и его входная цепочка, — поэтому различение режимов появится вместе с
+    /// планировщиком `hexforge-stream`; поле принимается ради совместимости
+    /// контракта (`05-IPC-CONTRACT.md`).
+    #[allow(dead_code)]
     pub preview_only: bool,
 }
 
@@ -313,7 +319,7 @@ pub struct RunNodeResponse {
 pub fn run_node(req: RunNodeRequest, state: State<AppState>) -> HexForgeResult<RunNodeResponse> {
     let node_id = parse_handle(&req.node_id)?;
     let started = Instant::now();
-    let output = resolve_node_output(&node_id, &state)?;
+    let output = resolve_node_output(&node_id, state.inner())?;
     let output_size_bytes = output.len() as u64;
 
     let output_handle = state
@@ -328,7 +334,7 @@ pub fn run_node(req: RunNodeRequest, state: State<AppState>) -> HexForgeResult<R
     })
 }
 
-fn resolve_node_output(node_id: &NodeId, state: &State<AppState>) -> HexForgeResult<Vec<u8>> {
+fn resolve_node_output(node_id: &NodeId, state: &AppState) -> HexForgeResult<Vec<u8>> {
     let node = {
         let graph = state.graph.read();
         graph.nodes.get(node_id).cloned().ok_or_else(|| {
@@ -396,16 +402,59 @@ fn resolve_node_output(node_id: &NodeId, state: &State<AppState>) -> HexForgeRes
     }
 
     let ctx: &dyn ExecutionContext = &NullExecutionContext;
+    // Хэш входа обязан вычисляться до перемещения буфера в apply (FR-4.2:
+    // снапшот фиксирует content-hash входа независимо от того, заберёт ли
+    // операция владение байтами).
+    let input_hash = blake3::hash(&input_bytes);
     let result = transform
         .apply(std::borrow::Cow::Owned(input_bytes), &node.params, ctx)
         .map_err(HexForgeError::from)?;
 
-    Ok(result.into_owned())
+    let output = result.into_owned();
+    record_snapshot(&node, state, input_hash, blake3::hash(&output));
+
+    Ok(output)
+}
+
+/// Чистый конструктор снапшота истории (FR-4.2): фиксирует операцию@версию,
+/// параметры и content-hash'и входа/выхода — этого достаточно для
+/// воспроизведения результата без хранения самих байтов.
+fn build_snapshot(
+    node: &OperationNode,
+    parent: Option<hexforge_core::SnapshotId>,
+    input_hash: blake3::Hash,
+    output_hash: blake3::Hash,
+) -> hexforge_core::Snapshot {
+    hexforge_core::Snapshot {
+        id: Uuid::new_v4(),
+        parent,
+        node_id: node.id,
+        operation_id: node.operation_id.clone(),
+        operation_version: node.operation_version.clone(),
+        params: node.params.clone(),
+        input_content_hash: input_hash,
+        output_content_hash: Some(output_hash),
+    }
+}
+
+/// Записывает снапшот успешно выполненного узла в историю. Parent — текущая
+/// голова истории на момент записи: MVP строит линейную цепочку, ветвление из
+/// произвольной точки появится вместе с UI Time-Travel (структура History уже
+/// DAG-ready). Локи берутся последовательно и не вложены в graph/sources —
+/// порядок захвата всегда history → (graph|sources), дедлок невозможен.
+fn record_snapshot(node: &OperationNode, state: &AppState, input_hash: blake3::Hash, output_hash: blake3::Hash) {
+    let parent = state.history.read().current;
+    let snapshot = build_snapshot(node, parent, input_hash, output_hash);
+    state.history.write().record(snapshot);
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelNodeRequest {
+    /// Зарезервировано для кооперативной отмены в async-планировщике
+    /// `hexforge-stream` (см. комментарий команды ниже); синхронный MVP
+    /// читает поле только при десериализации контракта.
+    #[allow(dead_code)]
     pub node_id: String,
 }
 
@@ -418,7 +467,7 @@ pub fn cancel_node(_req: CancelNodeRequest) -> bool {
     false
 }
 
-// ---------- History (заглушки контракта на Этапе 2) ----------
+// ---------- History ----------
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -433,13 +482,33 @@ pub struct SnapshotDto {
     pub output_content_hash: Option<String>,
 }
 
+/// Возвращает журнал снапшотов в порядке записи (см. `History::order`).
+/// Каждый успешный `run_node` пишет по одному снапшоту на выполненный узел
+/// входной цепочки; байты результатов не пересекают границу IPC — только
+/// content-hash'и (FR-4.2), сами байты доступны через `preview_bytes`.
 #[tauri::command]
-pub fn list_snapshots() -> Vec<SnapshotDto> {
-    // История как state-DAG подключается вместе с write-through в
-    // `hexforge-core::History` при каждом `run_node` — намеренно не
-    // реализовано в этом срезе Этапа 2, чтобы не расширять IPC-контракт
-    // до его ревью; сигнатура команды уже финальна.
-    Vec::new()
+pub fn list_snapshots(state: State<AppState>) -> Vec<SnapshotDto> {
+    list_snapshots_inner(state.inner())
+}
+
+fn list_snapshots_inner(state: &AppState) -> Vec<SnapshotDto> {
+    let history = state.history.read();
+    history
+        .ordered_snapshots()
+        .iter()
+        .map(|s| SnapshotDto {
+            id: s.id.to_string(),
+            parent: s.parent.map(|p| p.to_string()),
+            node_id: s.node_id.to_string(),
+            operation_id: s.operation_id.clone(),
+            operation_version: s.operation_version.clone(),
+            params: s.params.clone(),
+            input_content_hash: s.input_content_hash.to_hex().to_string(),
+            output_content_hash: s
+                .output_content_hash
+                .map(|h| h.to_hex().to_string()),
+        })
+        .collect()
 }
 
 // ---------- Плагины (заглушки контракта на Этапе 2) ----------
@@ -463,4 +532,203 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
     // ошибку, чтобы UI плагин-менеджера уже сейчас рендерил пустое
     // состояние корректно.
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::HexForgeErrorKind;
+
+    #[test]
+    fn detect_mime_known_magic_bytes() {
+        assert_eq!(
+            detect_mime(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]).as_deref(),
+            Some("image/png")
+        );
+        assert_eq!(detect_mime(&[0xFF, 0xD8, 0xFF, 0xE0]).as_deref(), Some("image/jpeg"));
+        assert_eq!(detect_mime(b"PK\x03\x04rest").as_deref(), Some("application/zip"));
+        assert_eq!(detect_mime(&[0x1F, 0x8B, 0x08, 0x00]).as_deref(), Some("application/gzip"));
+        assert_eq!(
+            detect_mime(b"MZ\x90\x00\x03").as_deref(),
+            Some("application/x-msdownload")
+        );
+        assert_eq!(
+            detect_mime(&[0x7F, b'E', b'L', b'F', 0x02, 0x01]).as_deref(),
+            Some("application/x-elf")
+        );
+    }
+
+    #[test]
+    fn detect_mime_unknown_and_short_inputs() {
+        assert_eq!(detect_mime(b"plain text").as_deref(), None);
+        // Входы короче любой магической последовательности не паникуют.
+        assert_eq!(detect_mime(&[]).as_deref(), None);
+        assert_eq!(detect_mime(&[0x89]).as_deref(), None);
+        assert_eq!(detect_mime(&[0x1F]).as_deref(), None);
+    }
+
+    #[test]
+    fn parse_handle_accepts_uuid_and_rejects_garbage() {
+        let id = Uuid::new_v4();
+        assert_eq!(parse_handle(&id.to_string()).expect("valid uuid"), id);
+
+        let err = parse_handle("not-a-uuid").unwrap_err();
+        assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
+        assert!(err.message.contains("not a valid source handle"));
+
+        assert_eq!(parse_handle("").unwrap_err().kind, HexForgeErrorKind::InvalidInput);
+    }
+
+    fn sample_node(id: NodeId) -> OperationNode {
+        OperationNode {
+            id,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![],
+        }
+    }
+
+    #[test]
+    fn build_snapshot_fixes_reproducibility_fields() {
+        let node_id = NodeId::new_v4();
+        let node = sample_node(node_id);
+        let parent = Uuid::new_v4();
+        let input_hash = blake3::hash(b"input-bytes");
+        let output_hash = blake3::hash(b"output-bytes");
+
+        let snap = build_snapshot(&node, Some(parent), input_hash, output_hash);
+
+        assert_ne!(snap.id, parent, "snapshot id must be freshly minted");
+        assert_eq!(snap.parent, Some(parent));
+        assert_eq!(snap.node_id, node_id);
+        assert_eq!(snap.operation_id, "text.rot13");
+        assert_eq!(snap.operation_version, "1.0.0");
+        assert_eq!(snap.input_content_hash, input_hash);
+        assert_eq!(snap.output_content_hash, Some(output_hash));
+
+        // Ключ воспроизводимости (FR-4.2) содержит hex хэша входа и версию.
+        let key = snap.reproducibility_key();
+        assert!(key.starts_with("text.rot13@1.0.0::"));
+        assert!(key.contains(&input_hash.to_hex()[..]));
+    }
+
+    /// Собирает граф root(sourceHandle) → base64-encode поверх реального
+    /// реестра операций — без Tauri State, через чистый AppState.
+    fn setup_chain(state: &AppState, literal: &[u8]) -> (NodeId, NodeId) {
+        let source_handle =
+            state.sources.write().insert(SourceEntry::InMemory(literal.to_vec()));
+
+        let root_id = NodeId::new_v4();
+        let encode_id = NodeId::new_v4();
+
+        state.graph.write().insert_node(OperationNode {
+            id: root_id,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": source_handle.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: encode_id,
+            operation_id: "encoding.base64.encode".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![root_id],
+        });
+        (root_id, encode_id)
+    }
+
+    #[test]
+    fn run_node_executes_and_records_history_for_whole_chain() {
+        use base64::Engine as _;
+
+        let state = AppState::new(hexforge_ops::build_registry());
+        let (root_id, encode_id) = setup_chain(&state, b"Hello");
+
+        let rot13_hello = rot13(b"Hello");
+        let expected_b64 = general_purpose::STANDARD.encode(&rot13_hello);
+
+        let output = resolve_node_output(&encode_id, &state).expect("chain must execute");
+        assert_eq!(output, expected_b64.into_bytes());
+
+        {
+            let history = state.history.read();
+            assert_eq!(history.order.len(), 2, "one snapshot per executed node");
+            let snaps = history.ordered_snapshots();
+            assert_eq!(snaps[0].node_id, root_id);
+            assert_eq!(snaps[1].node_id, encode_id);
+            // Линейная MVP-цепочка: второй снапшот ссылается на первый родителем.
+            assert_eq!(snaps[0].parent, None);
+            assert_eq!(snaps[1].parent, Some(snaps[0].id));
+            // Content-hash'и фиксируют фактические байты входа/выхода узла.
+            assert_eq!(snaps[0].input_content_hash, blake3::hash(b"Hello"));
+            assert_eq!(snaps[0].output_content_hash, Some(blake3::hash(&rot13_hello)));
+            // Вход следующего узла — выход предыдущего (воспроизводимость FR-4.2).
+            assert_eq!(snaps[1].input_content_hash, blake3::hash(&rot13_hello));
+            assert_eq!(history.current, Some(snaps[1].id));
+        }
+
+        // list_snapshots отражает тот же журнал в том же порядке,
+        // со строковыми UUID и hex-хэшами (контракт 05-IPC).
+        let dtos = list_snapshots_inner(&state);
+        assert_eq!(dtos.len(), 2);
+        assert_eq!(dtos[0].node_id, root_id.to_string());
+        assert_eq!(dtos[1].node_id, encode_id.to_string());
+        assert_eq!(
+            dtos[0].input_content_hash,
+            blake3::hash(b"Hello").to_hex().to_string()
+        );
+        assert_eq!(dtos[1].parent.as_deref(), Some(dtos[0].id.as_str()));
+    }
+
+    fn rot13(data: &[u8]) -> Vec<u8> {
+        data.iter()
+            .copied()
+            .map(|b| match b {
+                b'a'..=b'z' => b'a' + (b - b'a' + 13) % 26,
+                b'A'..=b'Z' => b'A' + (b - b'A' + 13) % 26,
+                other => other,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn run_node_rejects_version_mismatch() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let node_id = NodeId::new_v4();
+        let source_handle = state.sources.write().insert(SourceEntry::InMemory(b"x".to_vec()));
+        state.graph.write().insert_node(OperationNode {
+            id: node_id,
+            operation_id: "text.rot13".into(),
+            operation_version: "9.9.9".into(),
+            params: serde_json::json!({ "sourceHandle": source_handle.to_string() }),
+            inputs: vec![],
+        });
+
+        let err = resolve_node_output(&node_id, &state).unwrap_err();
+        assert_eq!(err.kind, HexForgeErrorKind::Internal);
+        assert!(err.message.contains("version mismatch"));
+        assert_eq!(err.node_id.as_deref(), Some(node_id.to_string().as_str()));
+        // Упавшее выполнение не оставляет снапшотов в истории.
+        assert!(state.history.read().order.is_empty());
+    }
+
+    #[test]
+    fn run_node_rejects_unknown_operation() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let node_id = NodeId::new_v4();
+        let source_handle = state.sources.write().insert(SourceEntry::InMemory(b"x".to_vec()));
+        state.graph.write().insert_node(OperationNode {
+            id: node_id,
+            operation_id: "encoding.nonexistent".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": source_handle.to_string() }),
+            inputs: vec![],
+        });
+
+        let err = resolve_node_output(&node_id, &state).unwrap_err();
+        assert_eq!(err.kind, HexForgeErrorKind::Internal);
+        assert!(err.message.contains("unknown operation"));
+    }
 }

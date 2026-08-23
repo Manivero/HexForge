@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 memmap2 = "0.9"
 base64 = "0.22"
 parking_lot = "0.12"
+blake3 = { workspace = true }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

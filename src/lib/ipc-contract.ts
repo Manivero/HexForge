@@ -5,12 +5,15 @@
 //
 // Статус реализации на Rust-стороне на срезе Этапа 2 (см. commands.rs):
 //   ✅ реализовано:  greet, listOperations, openFile, createLiteralSource,
-//                    previewBytes, releaseSource, setGraph, runNode,
-//                    cancelNode (заглушка), listSnapshots (заглушка),
-//                    listPlugins (заглушка)
+//                    previewBytes, releaseSource, setGraph, runNode
+//                    (+ запись Snapshot в History при каждом выполненном узле),
+//                    listSnapshots,
+//                    cancelNode (заглушка до async-планировщика),
+//                    listPlugins (заглушка до hexforge-plugin-host)
 //   ⏳ специфицировано, не подключено: exportRecipe, importRecipe,
 //                    importCyberChefRecipe, installPlugin, grantCapability,
-//                    revokeCapability — ждут hexforge-stream / hexforge-plugin-host.
+//                    revokeCapability, jumpToSnapshot — ждут hexforge-stream /
+//                    hexforge-plugin-host / Time-Travel UI.
 // Типы ниже описывают полный целевой контракт, не только реализованный срез.
 
 export type NodeId = string; // UUID v4
