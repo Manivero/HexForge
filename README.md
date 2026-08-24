@@ -21,8 +21,13 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   lineage-обход истории с защитой от parent-циклов)
 - ✅ React/TS strict фронтенд: `tsc --noEmit` чисто, `vite build` собирается,
   ESLint без замечаний
-- ✅ Command Palette (⌘K) — первый и центральный UI-компонент, подключён к
-  живому реестру операций через типизированный IPC-слой
+- ✅ Command Palette (⌘K) — первичный интерфейс, подключён к живому реестру
+  операций через типизированный IPC-слой
+- ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
+  источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
+  (вертикальный рельс DAG с выбором узлов) → PreviewDock (TEXT/HEX ≤4KB
+  из `preview_bytes`), статус-бар со счётчиком снапшотов; без нативного
+  бэкенда UI деградирует мягко (vite dev)
 - ✅ `src-tauri` (мост Rust↔WebView): workspace собирается целиком
   (`cargo build --workspace`), иконки сгенерированы (`src-tauri/icons/`),
   `run_node` — async (spawn_blocking) со стримингом `op://progress`, пишет

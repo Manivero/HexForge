@@ -1,14 +1,29 @@
 // Владение состоянием следует 03-INFORMATION-ARCHITECTURE.md §3: только
 // graphSlice попадает в экспортируемый .hexforge-recipe, всё остальное —
-// эфемерное UI-состояние. historySlice/dataSlice/pluginSlice полностью
-// расписаны в IA-документе и добавляются в этот store по мере реализации
-// соответствующих Rust-команд (см. комментарий статуса в ipc-contract.ts);
-// в этом срезе (Этап 2, Command Palette) реализованы ui/palette/operations
-// и минимальный graph slice, достаточный для линейных (non-merge) рецептов.
+// эфемерное UI-состояние. Срезы ui/palette/operations/graph реализованы в
+// Этапе 2; dataSlice добавляет первый сквозной поток данных по схеме из
+// 05-IPC-CONTRACT.md §3: литерал → create_literal_source → debounced
+// set_graph → run_node → preview_bytes → PreviewDock.
 
 import { create } from "zustand";
-import type { OperationDescriptor, OperationNodeDto } from "@/lib/ipc-contract";
-import { listOperations, setGraph as ipcSetGraph } from "@/lib/ipc";
+import {
+  listOperations,
+  setGraph as ipcSetGraph,
+  createLiteralSource,
+  runNode as ipcRunNode,
+  previewBytes as ipcPreviewBytes,
+  listSnapshots as ipcListSnapshots,
+  decodeBase64Chunk,
+} from "@/lib/ipc";
+import { HexForgeCommandError } from "@/lib/ipc-contract";
+import type {
+  NodeId,
+  OperationDescriptor,
+  OperationNodeDto,
+  RunNodeResponse,
+  SourceHandle,
+} from "@/lib/ipc-contract";
+import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 
 export type Theme = "dark" | "light";
 
@@ -38,13 +53,61 @@ interface GraphSlice {
   /** Добавляет узел операции, подключённый к текущему выделенному узлу
    * (или создаёт корень, если граф пуст) — прямая реализация FR-2.3. */
   addOperationNode: (operation: OperationDescriptor) => string;
+  /** Привязывает созданный источник к корню цепочки выделенного узла
+   * (params.sourceHandle корневого узла, конвенция 05-IPC-CONTRACT.md). */
+  assignSourceToRoot: () => boolean;
   syncGraphToBackend: () => Promise<void>;
 }
 
-export type AppStore = UiSlice & PaletteSlice & OperationsSlice & GraphSlice;
+/** Первый сквозной data-срез: источник байтов + выполнение + превью. */
+interface DataSlice {
+  sourceHandle: SourceHandle | null;
+  sourceSizeBytes: number | null;
+  creatingSource: boolean;
+  createSource: (text: string) => Promise<boolean>;
+
+  runningNodeId: NodeId | null;
+  lastRun: RunNodeResponse | null;
+  previewText: string | null;
+  previewHex: string | null;
+  /** true, если показаны не все байты результата (лимит окна превью). */
+  previewTruncated: boolean;
+  snapshotCount: number;
+  runError: string | null;
+  runSelectedNode: () => Promise<void>;
+}
+
+export type AppStore = UiSlice &
+  PaletteSlice &
+  OperationsSlice &
+  GraphSlice &
+  DataSlice;
 
 function newNodeId(): string {
   return crypto.randomUUID();
+}
+
+function formatIpcError(err: unknown): string {
+  if (err instanceof HexForgeCommandError) {
+    return `${err.details.kind}: ${err.details.message}`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+const PREVIEW_LENGTH_BYTES = 4096;
+
+// Дебаунс set_graph — контракт требует не блокировать ввод: локальный стейт
+// обновляется мгновенно, бэкенд получает граф через 120ms после последнего
+// изменения (05-IPC-CONTRACT.md §3).
+let syncTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleBackendSync(store: AppStore): void {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    void store.syncGraphToBackend().catch(() => {
+      /* без бэкенда (vite dev вне Tauri) молча пропускаем — UI деградирует
+         мягко, ошибка проявится при первом реальном запуске узла */
+    });
+  }, 120);
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -71,7 +134,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } catch (err) {
       set({
         operationsLoading: false,
-        operationsError: err instanceof Error ? err.message : String(err),
+        operationsError: formatIpcError(err),
       });
     }
   },
@@ -94,9 +157,111 @@ export const useAppStore = create<AppStore>((set, get) => ({
       nodes: { ...s.nodes, [id]: node },
       selectedNodeId: id,
     }));
+    scheduleBackendSync(get());
     return id;
+  },
+  assignSourceToRoot: () => {
+    const { selectedNodeId, nodes, sourceHandle } = get();
+    if (!sourceHandle || !selectedNodeId) {
+      return false;
+    }
+    // Поднимаемся по входной цепочке до корня (граф ацикличен — инвариант
+    // ядра), привязываем источник ему.
+    let cursor: OperationNodeDto | undefined = nodes[selectedNodeId];
+    while (cursor && cursor.inputs.length > 0) {
+      const nextId: string | undefined = cursor.inputs[0];
+      cursor = nextId !== undefined ? nodes[nextId] : undefined;
+    }
+    if (!cursor || cursor.inputs.length !== 0) {
+      return false;
+    }
+    const rootId = cursor.id;
+    const root = nodes[rootId];
+    if (!root) {
+      return false;
+    }
+    set({
+      nodes: { ...nodes, [rootId]: { ...root, params: { sourceHandle } } },
+    });
+    scheduleBackendSync(get());
+    return true;
   },
   syncGraphToBackend: async () => {
     await ipcSetGraph({ nodes: get().nodes });
+  },
+
+  // ---- data: literal source ----
+  sourceHandle: null,
+  sourceSizeBytes: null,
+  creatingSource: false,
+  createSource: async (text) => {
+    set({ creatingSource: true, runError: null });
+    try {
+      const resp = await createLiteralSource({ utf8: text });
+      set({
+        sourceHandle: resp.handle,
+        sourceSizeBytes: resp.sizeBytes,
+        creatingSource: false,
+        // Новые байты инвалидируют результат предыдущего запуска.
+        lastRun: null,
+        previewText: null,
+        previewHex: null,
+        previewTruncated: false,
+      });
+      get().assignSourceToRoot();
+      return true;
+    } catch (err) {
+      set({ creatingSource: false, runError: formatIpcError(err) });
+      return false;
+    }
+  },
+
+  // ---- data: run + preview ----
+  runningNodeId: null,
+  lastRun: null,
+  previewText: null,
+  previewHex: null,
+  previewTruncated: false,
+  snapshotCount: 0,
+  runError: null,
+  runSelectedNode: async () => {
+    const nodeId = get().selectedNodeId;
+    if (!nodeId) {
+      set({ runError: "Выберите узел для запуска (⌘K → операция)" });
+      return;
+    }
+    set({ runningNodeId: nodeId, runError: null });
+    try {
+      await get().syncGraphToBackend();
+      const res = await ipcRunNode({ nodeId, previewOnly: true });
+      const pb = await ipcPreviewBytes({
+        handle: res.outputHandle,
+        offset: 0,
+        length: PREVIEW_LENGTH_BYTES,
+      });
+      const bytes = decodeBase64Chunk(pb.base64Chunk);
+      set({
+        lastRun: res,
+        previewText: toLossyUtf8(bytes),
+        previewHex: toHexDump(bytes),
+        previewTruncated: pb.actualLength < res.outputSizeBytes,
+        runningNodeId: null,
+      });
+      try {
+        const snapshots = await ipcListSnapshots();
+        set({ snapshotCount: snapshots.length });
+      } catch {
+        /* счётчик истории вторичен — не затираем успешный запуск ошибкой */
+      }
+    } catch (err) {
+      set({
+        runningNodeId: null,
+        runError: formatIpcError(err),
+        lastRun: null,
+        previewText: null,
+        previewHex: null,
+        previewTruncated: false,
+      });
+    }
   },
 }));

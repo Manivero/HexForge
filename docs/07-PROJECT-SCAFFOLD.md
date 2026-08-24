@@ -55,7 +55,9 @@ hexforge/
 | ESLint | ✅ | `eslint . --ext ts,tsx --max-warnings 0` — 0 замечаний (`require()` в tailwind.config.ts заменён на ESM-import) |
 | Tauri command `greet` + полный IPC-слой (11 команд) | ✅ | `cargo build --workspace` проходит; иконки сгенерированы через `npx tauri icon` в `src-tauri/icons/` |
 | Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
-| Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 10 unit-тестов командного слоя/состояния зелёные |
+| Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 22 unit-теста командного слоя/состояния зелёные |
+| Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | Поток 05-IPC §3: литерал → create_literal_source → debounced set_graph → run_node → preview_bytes; рендер проверен headless-браузером на vite dev (0 ошибок консоли, мягкая деградация без бэкенда); сквозной прогон с реальным invoke — за `npm run tauri dev` |
+| GraphCanvas (вертикальный срез DAG) | ✅ | Рельс + карточки узлов в BFS-порядке от корней, выбор кликом, маркер sourceHandle у корня; раскладка — чистая функция от nodes (замена на полноценный layout без смены API); boot smoke-test нативного бинаря: `[hexforge-core] initialized with 7 operations` |
 
 ## Как запустить локально
 
@@ -117,3 +119,8 @@ npm run tauri dev
    (cargo test/build на Windows). Linux-джобу для Tauri добавлять вместе с
    системными зависимостями libwebkit2gtk; аудит зависимостей (`npm audit`,
    `cargo audit`) — отдельным шагом при подключении NFR-4.
+5. UI-срез Этапа 2 покрывает линейную цепочку с одним литеральным источником;
+   InspectorPanel/History-панель и мультиисточники — следующие срезы по
+   03-INFORMATION-ARCHITECTURE.md. `package-lock.json` закоммичен — CI
+   использует `npm ci`; `npm audit` (prod+dev) — 0 уязвимостей на момент
+   среза (NFR-4).
