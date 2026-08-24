@@ -15,6 +15,11 @@ export function PreviewDock() {
   const previewText = useAppStore((s) => s.previewText);
   const previewHex = useAppStore((s) => s.previewHex);
   const previewTruncated = useAppStore((s) => s.previewTruncated);
+  // FR-1.6 (видимая часть): граф мутировал после запуска → результат stale.
+  // Полная точечная инвалидация по downstream придёт с hexforge-stream.
+  const isStale = useAppStore(
+    (s) => s.lastRun !== null && s.ranAtGraphVersion !== s.graphVersion,
+  );
 
   const body =
     mode === "text" ? (previewText ?? "") : (previewHex ?? "");
@@ -24,6 +29,11 @@ export function PreviewDock() {
       <header className="mb-2 flex items-baseline justify-between">
         <h2 className="text-sm font-medium text-text-secondary">Preview</h2>
         <div className="flex items-center gap-2">
+          {isStale && (
+            <span className="rounded-sm border border-status-stale px-1.5 py-0.5 text-2xs text-status-stale">
+              stale
+            </span>
+          )}
           {lastRun && (
             <span className="text-2xs text-text-muted">
               {lastRun.outputSizeBytes} B · {lastRun.durationMs} ms · handle{" "}

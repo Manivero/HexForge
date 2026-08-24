@@ -2,14 +2,14 @@ import * as React from "react";
 import { CommandPalette } from "@/components/CommandPalette/CommandPalette";
 import { GraphCanvas } from "@/components/GraphCanvas/GraphCanvas";
 import { InputPanel } from "@/components/InputPanel/InputPanel";
+import { InspectorPanel } from "@/components/InspectorPanel/InspectorPanel";
 import { PreviewDock } from "@/components/PreviewDock/PreviewDock";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
- * Этап 2: минимальный shell + Command Palette (⌘K) + первый сквозной
- * data-поток по схеме 05-IPC-CONTRACT.md §3 + GraphCanvas (вертикальный
- * срез DAG). Полная разметка из 03-INFORMATION-ARCHITECTURE.md
- * (ActivityBar, InspectorPanel) подключается в следующих срезах —
+ * Этап 2: минимальный shell + Command Palette (⌘K) + сквозной data-поток
+ * по схеме 05-IPC-CONTRACT.md §3 + GraphCanvas + InspectorPanel (FR-3.2).
+ * ActivityBar и History-панель подключаются в следующих срезах —
  * App остаётся тонкой композицией.
  */
 export function App() {
@@ -86,6 +86,7 @@ export function App() {
             <GraphCanvas />
           </section>
 
+          <InspectorPanel />
           <InputPanel />
           <PreviewDock />
 

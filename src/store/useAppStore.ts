@@ -53,6 +53,9 @@ interface GraphSlice {
   /** Добавляет узел операции, подключённый к текущему выделенному узлу
    * (или создаёт корень, если граф пуст) — прямая реализация FR-2.3. */
   addOperationNode: (operation: OperationDescriptor) => string;
+  /** Мерджит patch в params выбранного/указанного узла (FR-3.2:
+   * форма параметров InspectorPanel) и планирует debounced set_graph. */
+  updateNodeParams: (nodeId: string, patch: Record<string, unknown>) => void;
   /** Привязывает созданный источник к корню цепочки выделенного узла
    * (params.sourceHandle корневого узла, конвенция 05-IPC-CONTRACT.md). */
   assignSourceToRoot: () => boolean;
@@ -66,8 +69,13 @@ interface DataSlice {
   creatingSource: boolean;
   createSource: (text: string) => Promise<boolean>;
 
+  /** Монотонный счётчик мутаций графа (узлы/параметры) — базис
+   * stale-инвалидации результата превью (видимая часть FR-1.6). */
+  graphVersion: number;
   runningNodeId: NodeId | null;
   lastRun: RunNodeResponse | null;
+  /** graphVersion на момент последнего успешного запуска. */
+  ranAtGraphVersion: number | null;
   previewText: string | null;
   previewHex: string | null;
   /** true, если показаны не все байты результата (лимит окна превью). */
@@ -156,9 +164,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({
       nodes: { ...s.nodes, [id]: node },
       selectedNodeId: id,
+      graphVersion: s.graphVersion + 1,
     }));
     scheduleBackendSync(get());
     return id;
+  },
+  updateNodeParams: (nodeId, patch) => {
+    const node = get().nodes[nodeId];
+    if (!node) {
+      return;
+    }
+    // Контракт типизирует params как unknown; по факту это плоский объект
+    // параметров JSON Schema. Не-объект (битый узел) заменяем на patch.
+    const current =
+      node.params !== null &&
+      typeof node.params === "object" &&
+      !Array.isArray(node.params)
+        ? (node.params as Record<string, unknown>)
+        : {};
+    const nextParams = { ...current, ...patch };
+    set((s) => ({
+      graphVersion: s.graphVersion + 1,
+      nodes: {
+        ...s.nodes,
+        [nodeId]: { ...node, params: nextParams },
+      },
+    }));
+    scheduleBackendSync(get());
   },
   assignSourceToRoot: () => {
     const { selectedNodeId, nodes, sourceHandle } = get();
@@ -204,6 +236,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         creatingSource: false,
         // Новые байты инвалидируют результат предыдущего запуска.
         lastRun: null,
+        ranAtGraphVersion: null,
         previewText: null,
         previewHex: null,
         previewTruncated: false,
@@ -217,8 +250,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- data: run + preview ----
+  graphVersion: 0,
   runningNodeId: null,
   lastRun: null,
+  ranAtGraphVersion: null,
   previewText: null,
   previewHex: null,
   previewTruncated: false,
@@ -242,6 +277,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const bytes = decodeBase64Chunk(pb.base64Chunk);
       set({
         lastRun: res,
+        ranAtGraphVersion: get().graphVersion,
         previewText: toLossyUtf8(bytes),
         previewHex: toHexDump(bytes),
         previewTruncated: pb.actualLength < res.outputSizeBytes,
@@ -258,6 +294,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         runningNodeId: null,
         runError: formatIpcError(err),
         lastRun: null,
+        ranAtGraphVersion: null,
         previewText: null,
         previewHex: null,
         previewTruncated: false,
