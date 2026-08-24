@@ -1,16 +1,18 @@
 import * as React from "react";
 import { CommandPalette } from "@/components/CommandPalette/CommandPalette";
 import { GraphCanvas } from "@/components/GraphCanvas/GraphCanvas";
+import { HistoryPanel } from "@/components/HistoryPanel/HistoryPanel";
 import { InputPanel } from "@/components/InputPanel/InputPanel";
 import { InspectorPanel } from "@/components/InspectorPanel/InspectorPanel";
 import { PreviewDock } from "@/components/PreviewDock/PreviewDock";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
- * Этап 2: минимальный shell + Command Palette (⌘K) + сквозной data-поток
- * по схеме 05-IPC-CONTRACT.md §3 + GraphCanvas + InspectorPanel (FR-3.2).
- * ActivityBar и History-панель подключаются в следующих срезах —
- * App остаётся тонкой композицией.
+ * Этап 2: shell + Command Palette (⌘K) + сквозной data-поток
+ * (05-IPC-CONTRACT.md §3) + GraphCanvas + InspectorPanel (FR-3.2) +
+ * HistoryPanel Time-Travel (FR-4.1, jump_to_snapshot). ActivityBar и
+ * полноценный DAG-canvas истории — следующие срезы; App остаётся тонкой
+ * композицией.
  */
 export function App() {
   const theme = useAppStore((s) => s.theme);
@@ -21,7 +23,7 @@ export function App() {
   const runningNodeId = useAppStore((s) => s.runningNodeId);
   const runError = useAppStore((s) => s.runError);
   const sourceHandle = useAppStore((s) => s.sourceHandle);
-  const snapshotCount = useAppStore((s) => s.snapshotCount);
+  const snapshots = useAppStore((s) => s.snapshots);
   const operationsError = useAppStore((s) => s.operationsError);
 
   React.useEffect(() => {
@@ -87,7 +89,10 @@ export function App() {
           </section>
 
           <InspectorPanel />
-          <InputPanel />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <InputPanel />
+            <HistoryPanel />
+          </div>
           <PreviewDock />
 
           {(runError || operationsError) && (
@@ -104,7 +109,7 @@ export function App() {
         <span>HexForge v0.1.0 — Node Graph MVP</span>
         <span className="flex gap-4">
           <span>{sourceHandle ? "source ready" : "no source"}</span>
-          <span>{snapshotCount} snapshot(s)</span>
+          <span>{snapshots.length} snapshot(s)</span>
         </span>
       </div>
 

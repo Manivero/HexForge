@@ -8,6 +8,7 @@ import type {
   CreateLiteralSourceResponse,
   GraphDto,
   HexForgeError,
+  JumpToSnapshotRequest,
   OpenFileRequest,
   OpenFileResponse,
   OperationDescriptor,
@@ -79,6 +80,10 @@ export function runNode(req: RunNodeRequest): Promise<RunNodeResponse> {
 
 export function cancelNode(nodeId: string): Promise<boolean> {
   return call<boolean>("cancel_node", { req: { nodeId } });
+}
+
+export function jumpToSnapshot(req: JumpToSnapshotRequest): Promise<RunNodeResponse> {
+  return call<RunNodeResponse>("jump_to_snapshot", { req });
 }
 
 export function listSnapshots(): Promise<SnapshotDto[]> {

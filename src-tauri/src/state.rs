@@ -51,6 +51,18 @@ impl SourceStore {
     pub fn release(&mut self, handle: &Uuid) -> bool {
         self.entries.remove(handle).is_some()
     }
+
+    /// Заменяет байты под существующим handle (нужен тестам целостности
+    /// replay-реплея); false — handle неизвестен.
+    #[cfg(test)]
+    pub fn replace(&mut self, handle: Uuid, entry: SourceEntry) -> bool {
+        if self.entries.contains_key(&handle) {
+            self.entries.insert(handle, entry);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Content-addressed LRU-кэш выходов узлов планировщика (см. scheduler.rs).

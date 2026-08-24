@@ -100,10 +100,10 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 66/66 зелёных
-(core 9, ops 16, stream 7, tauri 34 — включая IPC-parity golden-тесты и
-тесты планировщика), `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний,
-`vite build` — успешная сборка.
+Все изменения перепроверены: `cargo test --workspace` — 69/69 зелёных
+(core 9, ops 16, stream 7, tauri 37 — включая IPC-parity golden-тесты,
+тесты планировщика и lineage-реплея), `tsc --noEmit` — 0 ошибок,
+`eslint` — 0 замечаний, `vite build` — успешная сборка.
 1. Планировщик MVP (`src-tauri/src/scheduler.rs`): chunked `apply_chunk`
    внутри streamable-узлов, memoization по reproducibility_key,
    кооперативная отмена (kind="Cancelled"), merge через MergeTransform
@@ -112,9 +112,13 @@ npm run tauri dev
    Не-стримовая `apply` непрерываема до возврата (операции не опрашивают
    ctx.is_cancelled() внутри). `previewOnly` принимается, режимы пока
    не различаются.
-2. `list_plugins`, `jump_to_snapshot`, `import_cyberchef_recipe` —
-   контрактные заглушки; отмена реализована кооперативно ("Cancelled"
-   добавлен в TS-объединение аддитивно).
+2. `list_plugins`, `import_cyberchef_recipe` — контрактные заглушки.
+   Time-Travel реализован: `jump_to_snapshot` реплеит lineage от корневого
+   источника с верификацией content-hash'ей (источник изменён/освобождён →
+   InvalidInput; расхождение выхода → Internal, недетерминизм запрещён
+   FR-4.2) и переносит голову истории; HistoryPanel на фронте инициирует
+   прыжки. Ветка истории от произвольного снапшота (branching UI) —
+   следующий срез.
 3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
    `npx tauri icon <source.png>`; для смены брендинга повторить команду с
    новым исходником ≥ 1024×1024.

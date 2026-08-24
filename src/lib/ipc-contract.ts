@@ -13,11 +13,12 @@
 //                    события op://progress; Snapshot в History за каждый узел),
 //                    cancelNode (кооперативная отмена, kind="Cancelled"),
 //                    listSnapshots, exportRecipe, importRecipe,
+//                    jumpToSnapshot (lineage-реплей из корневого источника,
+//                    перенос головы истории),
 //                    listPlugins (заглушка до hexforge-plugin-host)
-//   ⏳ специфицировано, не подключено: jumpToSnapshot,
+//   ⏳ специфицировано, не подключено:
 //                    importCyberChefRecipe, installPlugin, grantCapability,
-//                    revokeCapability — ждут Time-Travel UI /
-//                    hexforge-plugin-host.
+//                    revokeCapability — ждут hexforge-plugin-host.
 //
 // Паритет типов с Rust-стороной защищён golden-тестами в
 // src-tauri/src/commands.rs (tests::*_matches_ts_contract): переименование

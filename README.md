@@ -28,6 +28,9 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   кооперативная отмена (`cancel_node` → `Cancelled`), merge-узлы через
   `MergeTransform` + `streaming.concat`; новый крейт `hexforge-stream`
   (чистые чанк-примитивы)
+- ✅ Time-Travel (FR-4): `jump_to_snapshot` — lineage-реплей из корневого
+  источника с верификацией content-hash'ей и переносом головы истории;
+  HistoryPanel (newest-first, клик = прыжок)
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
   источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
   (вертикальный рельс DAG с выбором узлов) → PreviewDock (TEXT/HEX ≤4KB
@@ -58,5 +61,5 @@ npm run tauri dev    # полное нативное приложение
 ## Дальше по плану MVP (см. PRD §3)
 
 Cross-node pipelining и bounded backpressure в планировщике (docs/04 §6) →
-Time-Travel UI (`jump_to_snapshot` поверх History) → `hexforge-plugin-host`
+Ветвление истории от произвольного снапшота → `hexforge-plugin-host`
 (Wasmtime sandbox) → CLI-режим (`hexforge-cli`).

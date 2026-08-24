@@ -397,6 +397,53 @@ pub struct ExportRecipeRequest {
     pub target_path: String,
 }
 
+// ---------- Time-Travel (FR-4) ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JumpToSnapshotRequest {
+    pub snapshot_id: String,
+}
+
+/// Time-Travel (FR-4.1): лениво пересчитывает выход снапшота из корневого
+/// источника через lineage-реплей (scheduler::replay_snapshot), кладёт
+/// результат в SourceStore и возвращает стандартный RunNodeResponse
+/// (контракт docs/05: "лениво пересчитывает"). Прыжок переносит голову
+/// истории на целевой снапшот — последующие запуски ветвятся от этой точки.
+#[tauri::command]
+pub async fn jump_to_snapshot(
+    req: JumpToSnapshotRequest,
+    state: State<'_, Arc<AppState>>,
+) -> HexForgeResult<RunNodeResponse> {
+    let snapshot_id = parse_handle(&req.snapshot_id)?;
+    let started = Instant::now();
+    let exec_state = Arc::clone(state.inner());
+    let history_state = Arc::clone(&exec_state);
+
+    let output = tauri::async_runtime::spawn_blocking(move || {
+        scheduler::replay_snapshot(&exec_state, snapshot_id)
+    })
+    .await
+    .map_err(|e| HexForgeError::internal(format!("replay worker failed: {e}")))??;
+
+    // FR-4.1: прыжок переносит голову истории на целевой снапшот.
+    history_state.history.write().current = Some(snapshot_id);
+
+    let output_size_bytes = output.len() as u64;
+    let output_handle = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory((*output).clone()));
+
+    Ok(RunNodeResponse {
+        output_handle: output_handle.to_string(),
+        output_size_bytes,
+        duration_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+// ---------- Экспорт/импорт рецептов ----------
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportRecipeRequest {

@@ -13,6 +13,7 @@ import {
   runNode as ipcRunNode,
   previewBytes as ipcPreviewBytes,
   listSnapshots as ipcListSnapshots,
+  jumpToSnapshot as ipcJumpToSnapshot,
   decodeBase64Chunk,
 } from "@/lib/ipc";
 import { HexForgeCommandError } from "@/lib/ipc-contract";
@@ -21,6 +22,8 @@ import type {
   OperationDescriptor,
   OperationNodeDto,
   RunNodeResponse,
+  SnapshotDto,
+  SnapshotId,
   SourceHandle,
 } from "@/lib/ipc-contract";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
@@ -80,9 +83,14 @@ interface DataSlice {
   previewHex: string | null;
   /** true, если показаны не все байты результата (лимит окна превью). */
   previewTruncated: boolean;
-  snapshotCount: number;
+  /** Журнал истории (list_snapshots) в порядке записи; UI показывает
+   * newest-first и инициирует прыжки (FR-4.1). */
+  snapshots: SnapshotDto[];
+  /** id снапшота, к которому сейчас идёт lineage-реплей. */
+  jumpingSnapshotId: SnapshotId | null;
   runError: string | null;
   runSelectedNode: () => Promise<void>;
+  jumpToSnapshot: (snapshotId: SnapshotId) => Promise<void>;
 }
 
 export type AppStore = UiSlice &
@@ -100,6 +108,17 @@ function formatIpcError(err: unknown): string {
     return `${err.details.kind}: ${err.details.message}`;
   }
   return err instanceof Error ? err.message : String(err);
+}
+
+/** Обновляет журнал истории; ошибка не всплывает — список вторичен
+ * относительно результата запуска/прыжка. */
+async function loadSnapshots(set: (partial: Partial<AppStore>) => void): Promise<void> {
+  try {
+    const snapshots = await ipcListSnapshots();
+    set({ snapshots });
+  } catch {
+    /* без бэкенда журнал недоступен — UI деградирует мягко */
+  }
 }
 
 const PREVIEW_LENGTH_BYTES = 4096;
@@ -257,7 +276,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   previewText: null,
   previewHex: null,
   previewTruncated: false,
-  snapshotCount: 0,
+  snapshots: [],
+  jumpingSnapshotId: null,
   runError: null,
   runSelectedNode: async () => {
     const nodeId = get().selectedNodeId;
@@ -283,12 +303,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewTruncated: pb.actualLength < res.outputSizeBytes,
         runningNodeId: null,
       });
-      try {
-        const snapshots = await ipcListSnapshots();
-        set({ snapshotCount: snapshots.length });
-      } catch {
-        /* счётчик истории вторичен — не затираем успешный запуск ошибкой */
-      }
+      await loadSnapshots(set);
     } catch (err) {
       set({
         runningNodeId: null,
@@ -299,6 +314,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewHex: null,
         previewTruncated: false,
       });
+    }
+  },
+  jumpToSnapshot: async (snapshotId) => {
+    set({ jumpingSnapshotId: snapshotId, runError: null });
+    try {
+      // Бэкенд сам реплеит lineage от корневого источника и переносит
+      // голову истории (FR-4.1); ответ — стандартный RunNodeResponse.
+      const res = await ipcJumpToSnapshot({ snapshotId });
+      const pb = await ipcPreviewBytes({
+        handle: res.outputHandle,
+        offset: 0,
+        length: PREVIEW_LENGTH_BYTES,
+      });
+      const bytes = decodeBase64Chunk(pb.base64Chunk);
+      set({
+        lastRun: res,
+        ranAtGraphVersion: get().graphVersion,
+        previewText: toLossyUtf8(bytes),
+        previewHex: toHexDump(bytes),
+        previewTruncated: pb.actualLength < res.outputSizeBytes,
+        jumpingSnapshotId: null,
+      });
+      await loadSnapshots(set);
+    } catch (err) {
+      set({ jumpingSnapshotId: null, runError: formatIpcError(err) });
     }
   },
 }));

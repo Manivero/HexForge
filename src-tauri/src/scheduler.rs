@@ -287,6 +287,137 @@ fn emit_progress(emitter: Option<&tauri::AppHandle>, node_id: &NodeId, bytes_pro
     }
 }
 
+/// Ленивый пересчёт снапшота (FR-4.1/4.2, Time-Travel): воспроизводит его
+/// выход из корневого источника через lineage-цепочку операций. Байты
+/// результата не хранятся в истории — только content-hash'и, поэтому реплей
+/// обязателен всякий раз, когда выход вытеснен из кэша или запрошен прыжок.
+///
+/// Контроль целостности на каждом шаге:
+/// - вход корневого узла цепочки берётся из SourceStore по
+///   `params.sourceHandle` и сверяется с `input_content_hash` корневого
+///   снапшота (источник изменён/освобождён → InvalidInput);
+/// - выход каждого шага сверяется с `output_content_hash` соответствующего
+///   снапшота — расхождение означало бы недетерминизм операции и нарушало бы
+///   FR-4.2, поэтому это Internal-ошибка, а не молчаливая подмена результата.
+pub fn replay_snapshot(
+    state: &AppState,
+    snapshot_id: hexforge_core::SnapshotId,
+) -> HexForgeResult<Arc<Vec<u8>>> {
+    let lineage: Vec<hexforge_core::Snapshot> = {
+        let history = state.history.read();
+        history
+            .lineage(snapshot_id)
+            .into_iter()
+            .cloned()
+            .collect()
+    };
+    let Some(first) = lineage.first() else {
+        return Err(HexForgeError::invalid_input(format!(
+            "unknown snapshot: {snapshot_id}"
+        )));
+    };
+
+    // Корень lineage обязан быть source-root: его узел живёт в текущем графе
+    // и ссылается на источник по params.sourceHandle.
+    let root_bytes: Arc<Vec<u8>> = {
+        let graph = state.graph.read();
+        let node = graph.nodes.get(&first.node_id).ok_or_else(|| {
+            HexForgeError::internal_for_node(
+                first.node_id,
+                format!(
+                    "cannot replay snapshot {snapshot_id}: root node {} is gone from the current graph",
+                    first.node_id
+                ),
+            )
+        })?
+        .clone();
+        drop(graph);
+
+        if !node.inputs.is_empty() {
+            return Err(HexForgeError::invalid_input(
+                "cannot replay snapshot: its root snapshot is not a source node",
+            ));
+        }
+        let handle_str =
+            node.params
+                .get("sourceHandle")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    HexForgeError::invalid_parameter(
+                        "sourceHandle",
+                        "root node of the lineage requires params.sourceHandle",
+                    )
+                })?;
+        let handle = Uuid::parse_str(handle_str)
+            .map_err(|_| HexForgeError::invalid_input(format!("'{handle_str}' is not a valid source handle")))?;
+        let sources = state.sources.read();
+        let entry = sources.get(&handle).ok_or_else(|| {
+            HexForgeError::invalid_input(format!(
+                "cannot replay snapshot {snapshot_id}: source {handle_str} has been released"
+            ))
+        })?;
+        Arc::new(entry.as_bytes().to_vec())
+    };
+
+    // Целостность корня: фактические байты источника обязаны совпасть
+    // с зафиксированным input_content_hash.
+    if blake3::hash(root_bytes.as_slice()) != first.input_content_hash {
+        return Err(HexForgeError::invalid_input(format!(
+            "cannot replay snapshot {snapshot_id}: source bytes no longer match the recorded input hash"
+        )));
+    }
+
+    let mut current = root_bytes;
+    for (index, step) in lineage.iter().enumerate() {
+        let node = OperationNode {
+            id: step.node_id,
+            operation_id: step.operation_id.clone(),
+            operation_version: step.operation_version.clone(),
+            params: step.params.clone(),
+            inputs: vec![],
+        };
+        let transform = lookup_transform(&node, state)?;
+
+        // Вход шага — выход предыдущего; для первого шага это корневой
+        // источник, уже сверённый выше по input_content_hash.
+        if index > 0 {
+            let input_hash = blake3::hash(current.as_slice());
+            if input_hash != step.input_content_hash {
+                return Err(HexForgeError::internal_for_node(
+                    step.node_id,
+                    format!(
+                        "replay mismatch at {}: input hash diverged from the recorded snapshot",
+                        step.operation_id
+                    ),
+                ));
+            }
+        }
+
+        // Реплей исполняет полный буфер через apply: chunked-путь здесь не
+        // нужен (вход целиком в памяти), кэш намеренно не затрагивается.
+        let ctx: &dyn ExecutionContext = &NullExecutionContext;
+        let view = transform
+            .apply(Cow::Borrowed(current.as_slice()), &node.params, ctx)
+            .map_err(HexForgeError::from)?;
+        let output: Arc<Vec<u8>> = Arc::new(view.into_owned());
+
+        if Some(blake3::hash(output.as_slice())) != step.output_content_hash {
+            return Err(HexForgeError::internal_for_node(
+                step.node_id,
+                format!(
+                    "replay mismatch at {}@{}: output hash differs from the recorded snapshot \
+                     (deterministic operations must reproduce their output exactly, FR-4.2)",
+                    step.operation_id, step.operation_version
+                ),
+            ));
+        }
+
+        current = output;
+    }
+
+    Ok(current)
+}
+
 /// Чистый конструктор снапшота истории (FR-4.2): фиксирует операцию@версию,
 /// параметры и content-hash'и входа/выхода — этого достаточно для
 /// воспроизведения результата без хранения самих байтов.
@@ -331,6 +462,7 @@ mod tests {
     use crate::state::{AppState, SourceEntry};
     use base64::{engine::general_purpose, Engine as _};
     use hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES;
+    use std::sync::atomic::AtomicBool;
 
     fn token() -> CancellationToken {
         Arc::new(AtomicBool::new(false))
@@ -579,6 +711,68 @@ mod tests {
         let err = execute_chain(&state, &bad, &token(), None).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
         assert!(err.message.contains("does not support 2 inputs"));
+    }
+
+    #[test]
+    fn replay_snapshot_reproduces_middle_of_chain() {
+        // Цепочка rot13 → base64; прыжок к СРЕДНЕМУ снапшоту обязан выдать
+        // ровно тот выход, который был зафиксирован при исполнении.
+        let state = AppState::new(hexforge_ops::build_registry());
+        let root = root_node(&state, b"Hello", "text.rot13");
+        let encode = child(&state, "encoding.base64.encode", root);
+
+        let final_out = execute_chain(&state, &encode, &token(), None).unwrap();
+        let (root_snap, encode_snap) = {
+            let history = state.history.read();
+            let snaps = history.ordered_snapshots();
+            (snaps[0].id, snaps[1].id)
+        };
+
+        // Прыжок к корню цепочки: выход = вход base64-узла.
+        let replayed_root = replay_snapshot(&state, root_snap).unwrap();
+        assert_eq!(replayed_root.as_slice(), b"Uryyb");
+
+        // Прыжок к последнему снапшоту: совпадает с обычным запуском.
+        let replayed_final = replay_snapshot(&state, encode_snap).unwrap();
+        assert_eq!(replayed_final.as_slice(), final_out.as_slice());
+    }
+
+    #[test]
+    fn replay_fails_for_unknown_snapshot() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let err =
+            replay_snapshot(&state, hexforge_core::SnapshotId::new_v4()).unwrap_err();
+        assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
+        assert!(err.message.contains("unknown snapshot"));
+    }
+
+    #[test]
+    fn replay_detects_mutated_source_bytes() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let root = root_node(&state, b"original", "text.rot13");
+        execute_chain(&state, &root, &token(), None).unwrap();
+        let snap_id = state
+            .history
+            .read()
+            .ordered_snapshots()
+            .first()
+            .map(|s| s.id)
+            .expect("one snapshot after successful run");
+
+        // Подменяем байты источника под тем же handle — content-hash разойдётся.
+        {
+            let mut sources = state.sources.write();
+            let node = state.graph.read().nodes.get(&root).cloned().unwrap();
+            let h = Uuid::parse_str(
+                node.params.get("sourceHandle").and_then(|v| v.as_str()).unwrap(),
+            )
+            .unwrap();
+            sources.replace(h, SourceEntry::InMemory(b"hacked!!".to_vec()));
+        }
+
+        let err = replay_snapshot(&state, snap_id).unwrap_err();
+        assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
+        assert!(err.message.contains("no longer match the recorded input hash"));
     }
 
     fn rot13(data: &[u8]) -> Vec<u8> {
