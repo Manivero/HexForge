@@ -18,7 +18,12 @@ pub type ByteView<'a> = Cow<'a, [u8]>;
 /// Декларация свойств операции. Используется планировщиком стриминга
 /// (`hexforge-stream`) и UI (оценка памяти, предупреждения FR-5.3)
 /// без необходимости выполнять саму операцию.
+///
+/// `camelCase` обязателен: тип уходит на провод в `list_operations` и
+/// побайтово соответствует `TransformCapabilities` из `ipc-contract.ts`
+/// (`memoryCost`, а не `memory_cost`) — см. `05-IPC-CONTRACT.md`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct TransformCapabilities {
     /// Одинаковый вход + одинаковые параметры => гарантированно одинаковый выход.
     /// `false` для операций вроде "generate random key" — такие узлы обязаны

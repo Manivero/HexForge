@@ -25,9 +25,10 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   живому реестру операций через типизированный IPC-слой
 - ✅ `src-tauri` (мост Rust↔WebView): workspace собирается целиком
   (`cargo build --workspace`), иконки сгенерированы (`src-tauri/icons/`),
-  `run_node` пишет Snapshot в Time-Travel History (blake3 content-hash'и),
-  `list_snapshots` возвращает реальный журнал; юнит-тесты командного слоя —
-  зелёные
+  `run_node` — async (spawn_blocking) со стримингом `op://progress`, пишет
+  Snapshot в Time-Travel History (blake3 content-hash'и); `list_snapshots`,
+  `export_recipe`/`import_recipe` реализованы; паритет IPC-типов защищён
+  golden-тестами; юнит-тесты командного слоя — зелёные
 - ⏳ Заглушки контракта: `cancel_node` (ждёт async-планировщик
   `hexforge-stream`), `list_plugins` (ждёт `hexforge-plugin-host`),
   export/import recipe

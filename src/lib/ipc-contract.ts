@@ -5,15 +5,20 @@
 //
 // Статус реализации на Rust-стороне на срезе Этапа 2 (см. commands.rs):
 //   ✅ реализовано:  greet, listOperations, openFile, createLiteralSource,
-//                    previewBytes, releaseSource, setGraph, runNode
-//                    (+ запись Snapshot в History при каждом выполненном узле),
-//                    listSnapshots,
+//                    previewBytes, releaseSource, setGraph,
+//                    runNode (async + spawn_blocking, события op://progress;
+//                    запись Snapshot в History за каждый выполненный узел),
+//                    listSnapshots, exportRecipe, importRecipe,
 //                    cancelNode (заглушка до async-планировщика),
 //                    listPlugins (заглушка до hexforge-plugin-host)
-//   ⏳ специфицировано, не подключено: exportRecipe, importRecipe,
+//   ⏳ специфицировано, не подключено: jumpToSnapshot,
 //                    importCyberChefRecipe, installPlugin, grantCapability,
-//                    revokeCapability, jumpToSnapshot — ждут hexforge-stream /
-//                    hexforge-plugin-host / Time-Travel UI.
+//                    revokeCapability — ждут Time-Travel UI /
+//                    hexforge-plugin-host.
+//
+// Паритет типов с Rust-стороной защищён golden-тестами в
+// src-tauri/src/commands.rs (tests::*_matches_ts_contract): переименование
+// поля или смена регистра роняет cargo test до попадания в рантайм.
 // Типы ниже описывают полный целевой контракт, не только реализованный срез.
 
 export type NodeId = string; // UUID v4

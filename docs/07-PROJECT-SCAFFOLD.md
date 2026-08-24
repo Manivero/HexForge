@@ -96,20 +96,24 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 26/26 зелёных
-(core 9, ops 7, tauri 10), `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний,
-`vite build` — успешная сборка.
-1. `run_node` в `commands.rs` — наивный рекурсивный исполнитель одного пути
-   графа без мемоизации и без chunked-стриминга; полноценный планировщик
-   (`hexforge-stream`) — следующий пункт плана MVP из PRD. `previewOnly`
-   принимается по контракту, но режимы пока не различаются (downstream в MVP
-   не пересчитывается вовсе).
-2. `list_plugins`, `cancel_node`, `jump_to_snapshot` и export/import recipe —
-   контрактные заглушки; `list_snapshots` с Этапа 2 возвращает реальный
-   журнал истории (write-through при `run_node`).
+Все изменения перепроверены: `cargo test --workspace` — 38/38 зелёных
+(core 9, ops 7, tauri 22 — включая IPC-parity golden-тесты), `tsc --noEmit` —
+0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка.
+1. `run_node` — async-команда (принцип №2 контракта): рекурсивный исполнитель
+   уходит в `spawn_blocking`, прогресс стримится через `op://progress`
+   по одному событию на завершённый узел. Без мемоизации и chunked-стриминга;
+   полноценный планировщик (`hexforge-stream`) — следующий пункт плана MVP.
+   `previewOnly` принимается по контракту, но режимы пока не различаются
+   (downstream в MVP не пересчитывается вовсе).
+2. `list_plugins`, `cancel_node`, `jump_to_snapshot`,
+   `import_cyberchef_recipe` — контрактные заглушки; `list_snapshots`
+   и `export_recipe`/`import_recipe` реализованы. Реальная отмена потребует
+   нового варианта `Cancelled` в `HexForgeErrorKind` (расширение публичного
+   контракта — согласование).
 3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
    `npx tauri icon <source.png>`; для смены брендинга повторить команду с
    новым исходником ≥ 1024×1024.
-4. `export_recipe`/`import_recipe`/`import_cyberchef_recipe` специфицированы
-   в `ipc-contract.ts`, но не имеют Rust-реализации — явно помечено в
-   комментариях контракта.
+4. CI (`.github/workflows/ci.yml`): frontend job (lint+build) и rust job
+   (cargo test/build на Windows). Linux-джобу для Tauri добавлять вместе с
+   системными зависимостями libwebkit2gtk; аудит зависимостей (`npm audit`,
+   `cargo audit`) — отдельным шагом при подключении NFR-4.

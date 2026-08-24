@@ -14,8 +14,11 @@ fn main() {
     let registry = hexforge_ops::build_registry();
     eprintln!("[hexforge-core] initialized with {} operations", registry.len());
 
+    // AppState управляется через Arc: async-команда run_node обязана
+    // передать владение состоянием в blocking-пул (spawn_blocking требует
+    // 'static), не копируя само состояние.
     tauri::Builder::default()
-        .manage(AppState::new(registry))
+        .manage(std::sync::Arc::new(AppState::new(registry)))
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::list_operations,
@@ -26,6 +29,8 @@ fn main() {
             commands::set_graph,
             commands::run_node,
             commands::cancel_node,
+            commands::export_recipe,
+            commands::import_recipe,
             commands::list_snapshots,
             commands::list_plugins,
         ])

@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Гейт качества фронтенда: ESLint (--max-warnings 0) + tsc --noEmit +
+      # production-сборка Vite (внутри npm run build).
+      - run: npm run lint
+      - run: npm run build
+
+  rust:
+    # windows-latest: Tauri v2 на Linux требует системного libwebkit2gtk —
+    # для юнит-тестов и проверки компиляции достаточно Windows-раннера,
+    # совпадающего с основной платформой разработки.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Юнит-тесты всех крейтов workspace (core, ops, tauri-командный слой,
+      # включая IPC-parity golden-тесты).
+      - run: cargo test --workspace
+      - run: cargo build --workspace
