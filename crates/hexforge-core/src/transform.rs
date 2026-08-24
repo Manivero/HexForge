@@ -121,8 +121,11 @@ pub trait Transform: Send + Sync {
 
     /// Потоковое выполнение — планировщик вызывает эту функцию чанк за чанком
     /// для операций с `capabilities().streamable == true`. `state` — per-node
-    /// состояние между вызовами (напр. незавершённый блок для выравнивания
-    /// блочного шифра), заведённое и освобождаемое планировщиком.
+    /// состояние между вызовами, принадлежащее планировщику (`Box<dyn Any>`):
+    /// операция при первом вызове обязана засеять свой конкретный тип
+    /// (`*state = Box::new(MyState::default())`) и далее работать через
+    /// `downcast_mut` — контракт docs/04 §6 ("заведённое и освобождаемое
+    /// планировщиком") сохраняется, но тип выбирает операция.
     ///
     /// Дефолтная реализация осознанно не поддерживается: операция обязана
     /// либо явно реализовать потоковый путь, либо задекларировать
@@ -132,7 +135,7 @@ pub trait Transform: Send + Sync {
         &self,
         chunk: &[u8],
         is_last: bool,
-        state: &mut dyn Any,
+        state: &mut Box<dyn Any>,
         params: &serde_json::Value,
         ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
@@ -141,4 +144,22 @@ pub trait Transform: Send + Sync {
             "apply_chunk not implemented for this operation; capabilities().streamable must be false".into(),
         ))
     }
+}
+
+/// Контракт N-арных операций слияния (PRD FR-1.2/FR-1.4: `Merge`/`XOR`,
+/// «concat, xor, diff, zip»). Семантика слияния принадлежит операции,
+/// а не планировщику: узел графа с `inputs.len() > 1` исполним только тогда,
+/// когда его операция реализует этот трейт; иначе планировщик возвращает
+/// `InvalidInput`. Порядок `inputs` в узле — часть контракта операции
+/// (напр. concat склеивает ровно в заявленном порядке).
+///
+/// Трейт отдельный и опциональный: унарные операции не трогаются, реестр
+/// хранит merge-реализации во второй карте (`TransformRegistry::get_merge`).
+pub trait MergeTransform: Transform {
+    fn apply_merge<'a>(
+        &self,
+        inputs: Vec<ByteView<'a>>,
+        params: &serde_json::Value,
+        ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError>;
 }

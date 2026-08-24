@@ -4,25 +4,16 @@
 //! обеспечивает совпадение имён полей с TS без ручного маппинга.
 
 use crate::error::{HexForgeError, HexForgeResult};
+use crate::scheduler;
 use crate::state::{AppState, SourceEntry};
 use base64::{engine::general_purpose, Engine as _};
 use hexforge_core::graph::{Graph, NodeId, OperationNode};
-use hexforge_core::transform::{ExecutionContext, NullExecutionContext};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::{Emitter, State};
+use tauri::State;
 use uuid::Uuid;
-
-/// Событие прогресса выполнения (`op://progress`, 05-IPC-CONTRACT.md §events).
-/// Поле `bytesTotal: null` соответствует TS `number | null`.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProgressEvent {
-    pub node_id: String,
-    pub bytes_processed: u64,
-    pub bytes_total: Option<u64>,
-}
 
 /// Верификационная команда моста Rust<->React для Этапа 2 ("greet").
 /// Держим её постоянно как smoke-test канала IPC, а не только как временный
@@ -336,18 +327,36 @@ pub async fn run_node(
     let started = Instant::now();
     let exec_state = Arc::clone(state.inner());
 
-    // ������� �2 IPC-��������� (`05-IPC-CONTRACT.md` �1): �������, ���������
-    // ����������� ������ 16ms, ������� ���� async � �� ����������� �������.
-    // CPU-bound ����������� ����������� ������ � blocking-���; async-������
-    // ������ ��� ��������� � �������� �������� ����� op://progress.
+    // Кооперативная отмена: токен живёт в AppState до завершения запуска;
+    // cancel_node находит его по запрошенному nodeId и выставляет флаг.
+    let token: crate::state::CancellationToken = Arc::new(AtomicBool::new(false));
+    if !exec_state.register_cancellation(node_id, Arc::clone(&token)) {
+        return Err(HexForgeError::invalid_input(
+            "too many concurrent node executions; cancel a running node first",
+        ));
+    }
+
+    // Принцип №2 IPC-контракта (`05-IPC-CONTRACT.md` §1): команда, способная
+    // выполняться дольше 16ms, обязана быть async и не блокировать рантайм.
+    // CPU-bound планировщик уходит в blocking-пул; async-задача только ждёт
+    // результат и репортит прогресс через op://progress.
+    let task_token = Arc::clone(&token);
+    let task_state = Arc::clone(&exec_state);
     let output = tauri::async_runtime::spawn_blocking(move || {
-        resolve_node_output(&node_id, &exec_state, Some(&app))
+        scheduler::execute_chain(&task_state, &node_id, &task_token, Some(&app))
     })
     .await
     .map_err(|e| HexForgeError::internal(format!("node execution worker failed: {e}")))??;
 
+    // Гарантированный cleanup реестра отмен (успех или ошибка — токен снят).
+    // Если cancel_node уже изъял токен (one-shot), take вернёт None — это норм.
+    let _ = exec_state.take_cancellation(&node_id);
+
     let output_size_bytes = output.len() as u64;
-    let output_handle = state.sources.write().insert(SourceEntry::InMemory(output));
+    let output_handle = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory((*output).clone()));
 
     Ok(RunNodeResponse {
         output_handle: output_handle.to_string(),
@@ -356,163 +365,30 @@ pub async fn run_node(
     })
 }
 
-fn resolve_node_output(
-    node_id: &NodeId,
-    state: &AppState,
-    emitter: Option<&tauri::AppHandle>,
-) -> HexForgeResult<Vec<u8>> {
-    let node = {
-        let graph = state.graph.read();
-        graph.nodes.get(node_id).cloned().ok_or_else(|| {
-            HexForgeError::internal_for_node(node_id, format!("node {node_id} not found in current graph"))
-        })?
-    };
-
-    let input_bytes: Vec<u8> = match node.inputs.len() {
-        0 => {
-            // Корневой узел — байты берутся из SourceStore по хэндлу,
-            // переданному в params.source_handle (см. комментарий в
-            // `05-IPC-CONTRACT.md` о конвенции корневых узлов).
-            let handle_str = node
-                .params
-                .get("sourceHandle")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    HexForgeError::invalid_parameter("sourceHandle", "root node requires params.sourceHandle")
-                })?;
-            let handle = parse_handle(handle_str)?;
-            let sources = state.sources.read();
-            let entry = sources
-                .get(&handle)
-                .ok_or_else(|| HexForgeError::internal_for_node(node_id, format!("unknown source handle: {handle_str}")))?;
-            // NOTE (задокументированный tech debt, см. docs/07 §"Известные
-            // ограничения"): `.to_vec()` копирует весь корневой буфер на
-            // каждый вызов, что противоречит NFR-2 (zero-copy). Осознанно
-            // не исправлено в этом патче: убрать копию можно только вместе
-            // с редизайном сигнатуры под `Cow<[u8]>`, привязанный к времени
-            // жизни `RwLockReadGuard`, а этот guard приходится держать
-            // одновременно с рекурсивным вызовом ниже по графу, который сам
-            // берёт локи на `state.sources`/`state.graph` — наивная попытка
-            // вернуть заимствование отсюда либо не скомпилируется, либо
-            // (если протолкнуть через unsafe) создаст риск дедлока при
-            // конкурентном доступе. Правильное решение — планировщик
-            // `hexforge-stream`, а не точечный патч этой функции.
-            entry.as_bytes().to_vec()
-        }
-        1 => resolve_node_output(&node.inputs[0], state, emitter)?,
-        _ => {
-            return Err(HexForgeError::internal_for_node(
-                node_id,
-                "multi-input merge nodes are not yet implemented in the MVP command layer; \
-                 requires the hexforge-stream N-ary scheduler",
-            ))
-        }
-    };
-
-    let transform = state
-        .registry
-        .get(&node.operation_id)
-        .ok_or_else(|| HexForgeError::internal_for_node(node_id, format!("unknown operation: {}", node.operation_id)))?;
-
-    if transform.version() != node.operation_version {
-        return Err(HexForgeError::internal_for_node(
-            node_id,
-            format!(
-                "operation '{}' version mismatch: node expects {}, registry has {} \
-                 (reproducibility guarantee violated, see FR-4.2)",
-                node.operation_id,
-                node.operation_version,
-                transform.version()
-            ),
-        ));
-    }
-
-    let ctx: &dyn ExecutionContext = &NullExecutionContext;
-    // ��� ����� ������ ����������� �� ����������� ������ � apply (FR-4.2:
-    // ������� ��������� content-hash ����� ���������� �� ����, ������ ��
-    // �������� �������� �������).
-    let input_hash = blake3::hash(&input_bytes);
-    let input_len = input_bytes.len();
-    let result = transform
-        .apply(std::borrow::Cow::Owned(input_bytes), &node.params, ctx)
-        .map_err(HexForgeError::from)?;
-
-    let output = result.into_owned();
-    record_snapshot(&node, state, input_hash, blake3::hash(&output));
-
-    // �������� ���������� �� �������� ����� ������� (�������� �run_node:
-    // "������ ������� �������� �������� ����� op://progress"). ����������
-    // MVP-�������� ���� ctx.report_progress �� ��������, ������� �������
-    // ���� �� ����������� � �� ������ �� ����������� ����; bytes_total
-    // ���������� �� ���������� ���� ������� (null � �������� TS-���������).
-    // ������ �������� ������� ����������� ������������: ����������
-    // ���������/�������� ���� �� ������ ������ ���������� ����.
-    if let Some(app) = emitter {
-        let _ = app.emit(
-            "op://progress",
-            ProgressEvent {
-                node_id: node.id.to_string(),
-                bytes_processed: input_len as u64,
-                bytes_total: None,
-            },
-        );
-    }
-
-    Ok(output)
-}
-
-/// Чистый конструктор снапшота истории (FR-4.2): фиксирует операцию@версию,
-/// параметры и content-hash'и входа/выхода — этого достаточно для
-/// воспроизведения результата без хранения самих байтов.
-fn build_snapshot(
-    node: &OperationNode,
-    parent: Option<hexforge_core::SnapshotId>,
-    input_hash: blake3::Hash,
-    output_hash: blake3::Hash,
-) -> hexforge_core::Snapshot {
-    hexforge_core::Snapshot {
-        id: Uuid::new_v4(),
-        parent,
-        node_id: node.id,
-        operation_id: node.operation_id.clone(),
-        operation_version: node.operation_version.clone(),
-        params: node.params.clone(),
-        input_content_hash: input_hash,
-        output_content_hash: Some(output_hash),
-    }
-}
-
-/// Записывает снапшот успешно выполненного узла в историю. Parent — текущая
-/// голова истории на момент записи: MVP строит линейную цепочку, ветвление из
-/// произвольной точки появится вместе с UI Time-Travel (структура History уже
-/// DAG-ready). Локи берутся последовательно и не вложены в graph/sources —
-/// порядок захвата всегда history → (graph|sources), дедлок невозможен.
-fn record_snapshot(node: &OperationNode, state: &AppState, input_hash: blake3::Hash, output_hash: blake3::Hash) {
-    let parent = state.history.read().current;
-    let snapshot = build_snapshot(node, parent, input_hash, output_hash);
-    state.history.write().record(snapshot);
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelNodeRequest {
-    /// Зарезервировано для кооперативной отмены в async-планировщике
-    /// `hexforge-stream` (см. комментарий команды ниже); синхронный MVP
-    /// читает поле только при десериализации контракта.
-    #[allow(dead_code)]
     pub node_id: String,
 }
 
-/// MVP: выполнение узлов синхронно и коротко в рамках Этапа 2, поэтому
-/// настоящая кооперативная отмена ещё не подключена — она приходит вместе
-/// с async-планировщиком `hexforge-stream`. Команда уже присутствует в
-/// контракте, чтобы фронтенд не менялся, когда появится реальная отмена.
+/// Кооперативная отмена запущенного узла (контракт: `bool` — был ли найден
+/// активный запуск). Токен изымается из реестра и выставляется флагом:
+/// планировщик замечает это на ближайшем чекпоинте (между узлами или между
+/// чанками streamable-операции) и завершается ошибкой `Cancelled`.
+/// Повторный cancel того же запуска вернёт `false` — отмена one-shot.
 #[tauri::command]
-pub fn cancel_node(_req: CancelNodeRequest) -> bool {
-    false
+pub fn cancel_node(req: CancelNodeRequest, state: State<Arc<AppState>>) -> bool {
+    let Ok(node_id) = parse_handle(&req.node_id) else {
+        return false;
+    };
+    match state.take_cancellation(&node_id) {
+        Some(token) => {
+            token.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
 }
-
-// ---------- Экспорт/импорт рецептов (FR-4.2) ----------
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -738,38 +614,12 @@ mod tests {
         assert_eq!(parse_handle("").unwrap_err().kind, HexForgeErrorKind::InvalidInput);
     }
 
-    fn sample_node(id: NodeId) -> OperationNode {
-        OperationNode {
-            id,
-            operation_id: "text.rot13".into(),
-            operation_version: "1.0.0".into(),
-            params: serde_json::json!({}),
-            inputs: vec![],
-        }
-    }
-
     #[test]
-    fn build_snapshot_fixes_reproducibility_fields() {
-        let node_id = NodeId::new_v4();
-        let node = sample_node(node_id);
-        let parent = Uuid::new_v4();
-        let input_hash = blake3::hash(b"input-bytes");
-        let output_hash = blake3::hash(b"output-bytes");
-
-        let snap = build_snapshot(&node, Some(parent), input_hash, output_hash);
-
-        assert_ne!(snap.id, parent, "snapshot id must be freshly minted");
-        assert_eq!(snap.parent, Some(parent));
-        assert_eq!(snap.node_id, node_id);
-        assert_eq!(snap.operation_id, "text.rot13");
-        assert_eq!(snap.operation_version, "1.0.0");
-        assert_eq!(snap.input_content_hash, input_hash);
-        assert_eq!(snap.output_content_hash, Some(output_hash));
-
-        // Ключ воспроизводимости (FR-4.2) содержит hex хэша входа и версию.
-        let key = snap.reproducibility_key();
-        assert!(key.starts_with("text.rot13@1.0.0::"));
-        assert!(key.contains(&input_hash.to_hex()[..]));
+    fn scheduler_registry_exposes_merge_operation() {
+        // Переехало в scheduler.rs вместе с build_snapshot; здесь остаётся
+        // смоук-проверка, что реестр содержит merge-операцию планировщика.
+        let registry = hexforge_ops::build_registry();
+        assert!(registry.get_merge("streaming.concat").is_some());
     }
 
     /// Собирает граф root(sourceHandle) → base64-encode поверх реального
@@ -798,6 +648,10 @@ mod tests {
         (root_id, encode_id)
     }
 
+    fn fresh_token() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+        Arc::new(AtomicBool::new(false))
+    }
+
     #[test]
     fn run_node_executes_and_records_history_for_whole_chain() {
         use base64::Engine as _;
@@ -808,8 +662,10 @@ mod tests {
         let rot13_hello = rot13(b"Hello");
         let expected_b64 = general_purpose::STANDARD.encode(&rot13_hello);
 
-        let output = resolve_node_output(&encode_id, &state, None).expect("chain must execute");
-        assert_eq!(output, expected_b64.into_bytes());
+        let output =
+            scheduler::execute_chain(&state, &encode_id, &fresh_token(), None)
+                .expect("chain must execute");
+        assert_eq!(output.as_slice(), expected_b64.into_bytes().as_slice());
 
         {
             let history = state.history.read();
@@ -865,7 +721,7 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = resolve_node_output(&node_id, &state, None).unwrap_err();
+        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), None).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("version mismatch"));
         assert_eq!(err.node_id.as_deref(), Some(node_id.to_string().as_str()));
@@ -886,7 +742,7 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = resolve_node_output(&node_id, &state, None).unwrap_err();
+        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), None).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("unknown operation"));
     }
@@ -928,6 +784,7 @@ mod tests {
             HexForgeErrorKind::DanglingInput,
             HexForgeErrorKind::PluginSignatureInvalid,
             HexForgeErrorKind::PluginCapabilityDenied,
+            HexForgeErrorKind::Cancelled,
             HexForgeErrorKind::Internal,
         ]
         .iter()
@@ -949,8 +806,15 @@ mod tests {
                 "DanglingInput",
                 "PluginSignatureInvalid",
                 "PluginCapabilityDenied",
+                "Cancelled",
                 "Internal",
             ]
+        );
+
+        // Wire format нового варианта: PascalCase-слово без изменений.
+        assert_eq!(
+            serde_json::to_value(HexForgeErrorKind::Cancelled).unwrap(),
+            serde_json::json!("Cancelled")
         );
     }
 
@@ -1086,6 +950,7 @@ mod tests {
 
     #[test]
     fn progress_event_matches_ts_contract() {
+        use crate::scheduler::ProgressEvent;
         let ev = ProgressEvent {
             node_id: "00000000-0000-4000-8000-00000000000a".into(),
             bytes_processed: 42,

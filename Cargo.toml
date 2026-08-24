@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/hexforge-core",
     "crates/hexforge-ops",
+    "crates/hexforge-stream",
     "src-tauri",
 ]
 

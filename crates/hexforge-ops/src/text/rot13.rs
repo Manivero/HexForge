@@ -40,6 +40,18 @@ impl Transform for Rot13 {
         let out: Vec<u8> = input.iter().copied().map(rot13_byte).collect();
         Ok(Cow::Owned(out))
     }
+
+    fn apply_chunk(
+        &self,
+        chunk: &[u8],
+        _is_last: bool,
+        _state: &mut Box<dyn std::any::Any>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<Vec<u8>, TransformError> {
+        // Байт-независимая операция: состояние между чанками не нужно.
+        Ok(chunk.iter().copied().map(rot13_byte).collect())
+    }
 }
 
 inventory::submit! { crate::TransformEntry(&Rot13) }
@@ -60,5 +72,23 @@ mod tests {
 
         let twice = Rot13.apply(once, &params, &ctx).unwrap();
         assert_eq!(twice.as_ref(), input.as_ref());
+    }
+
+    #[test]
+    fn chunked_matches_apply_on_split_input() {
+        let ctx = NullExecutionContext;
+        let params = serde_json::json!({});
+        let input = b"Split Me 123";
+
+        let whole = Rot13.apply(Cow::Borrowed(input), &params, &ctx).unwrap();
+
+        let mut state: Box<dyn std::any::Any> = Box::new(());
+        let mut chunked = Vec::new();
+        for (i, part) in [b"Spl".as_slice(), b"it ", b"Me", b" 123"].iter().enumerate() {
+            chunked.extend_from_slice(
+                &Rot13.apply_chunk(part, i == 3, &mut state, &params, &ctx).unwrap(),
+            );
+        }
+        assert_eq!(whole.as_ref(), chunked.as_slice());
     }
 }

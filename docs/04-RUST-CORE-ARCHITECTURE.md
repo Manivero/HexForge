@@ -109,13 +109,14 @@ pub trait Transform: Send + Sync {
 
     /// Потоковое выполнение — вызывается планировщиком чанк за чанком
     /// для операций с `capabilities().streamable == true`.
-    /// Дефолтная реализация деградирует до накопления в буфер и вызова `apply`,
-    /// что осознанно (и явно в capabilities) для не-потоковых операций.
+    /// `state` — per-node состояние, принадлежащее планировщику (`Box<dyn Any>`):
+    /// операция при первом вызове засеивает свой конкретный тип и далее
+    /// работает через downcast_mut.
     fn apply_chunk(
         &self,
         chunk: &[u8],
         is_last: bool,
-        state: &mut dyn std::any::Any,
+        state: &mut Box<dyn std::any::Any>,
         params: &serde_json::Value,
         ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
@@ -124,6 +125,18 @@ pub trait Transform: Send + Sync {
             "apply_chunk not implemented; capabilities().streamable must be false".into(),
         ))
     }
+}
+
+/// Контракт N-арных операций слияния (PRD FR-1.2/FR-1.4). Семантика слияния
+/// принадлежит операции: узел графа с N>1 входами исполним только если его
+/// операция реализует этот трейт (реестр хранит их во второй карте).
+pub trait MergeTransform: Transform {
+    fn apply_merge<'a>(
+        &self,
+        inputs: Vec<ByteView<'a>>,
+        params: &serde_json::Value,
+        ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError>;
 }
 
 /// Валидация параметров до выполнения — отдельно от `apply`, чтобы UI мог
@@ -257,6 +270,27 @@ inventory::submit! { &Base64Decode as &dyn Transform }
 передаётся в Tauri `State`.
 
 ## 6. Стриминг и планировщик (`hexforge-stream`)
+
+> **Статус MVP (фактическая реализация, обновлено в срезе hexforge-stream):**
+> - `hexforge-stream` — чистые чанк-примитивы без знания о домене
+>   (`chunk_ranges`, `DEFAULT_CHUNK_SIZE_BYTES` = 1 МиБ), правило зависимостей
+>   из §1 соблюдено буквально.
+> - Планировщик графа живёт в `src-tauri/src/scheduler.rs`: он обязан знать
+>   домен (реестр, кэш, история), и вынос в отдельный крейт сейчас означал бы
+>   цикл зависимостей либо дублирование типов. Это осознанное отклонение от
+>   буквы этого раздела; путь миграции — выделение планировщика в крейт после
+>   стабилизации контракта `hexforge-plugin-host`.
+> - Chunked-исполнение: streamable-узлы исполняются чанками `apply_chunk`
+>   над zero-copy срезами входа; per-node состояние — `Box<dyn Any>`,
+>   засеивается операцией при первом чанке. Cross-node pipelining,
+>   bounded backpressure (mpsc) и 64 МБ-чанки FR-5.2 — следующий этап.
+> - Memoization: content-addressed LRU-кэш выходов по
+>   `reproducibility_key(op@ver :: input_hash :: params)` (см. §4),
+>   значения `Arc<Vec<u8>>`, бюджет по байтам (дефолт 256 МБ).
+> - Кооперативная отмена: токен на запрошенный узел, чекпоинты между узлами
+>   и между чанками streamable-операций; ошибка `Cancelled`.
+> - Merge: N-арные узлы исполняются через `MergeTransform::apply_merge`
+>   (PRD FR-1.2/FR-1.4); первая операция — `streaming.concat`.
 
 - Источник файла открывается через `memmap2` для файлов на диске (zero-copy),
   и через ручное чтение чанками по 64 МБ (`DEFAULT_CHUNK_SIZE`) там, где mmap

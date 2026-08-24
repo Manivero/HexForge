@@ -3,13 +3,16 @@
 // обязана иметь структуры, побайтово соответствующие этим типам через
 // #[serde(rename_all = "camelCase")].
 //
-// Статус реализации на Rust-стороне на срезе Этапа 2 (см. commands.rs):
+// Статус реализации на Rust-стороне на срезе hexforge-stream (см. commands.rs
+// и src-tauri/src/scheduler.rs):
 //   ✅ реализовано:  greet, listOperations, openFile, createLiteralSource,
 //                    previewBytes, releaseSource, setGraph,
-//                    runNode (async + spawn_blocking, события op://progress;
-//                    запись Snapshot в History за каждый выполненный узел),
+//                    runNode (async + spawn_blocking; chunked apply_chunk для
+//                    streamable-операций; memoization по reproducibility_key;
+//                    merge-узлы через MergeTransform/streaming.concat;
+//                    события op://progress; Snapshot в History за каждый узел),
+//                    cancelNode (кооперативная отмена, kind="Cancelled"),
 //                    listSnapshots, exportRecipe, importRecipe,
-//                    cancelNode (заглушка до async-планировщика),
 //                    listPlugins (заглушка до hexforge-plugin-host)
 //   ⏳ специфицировано, не подключено: jumpToSnapshot,
 //                    importCyberChefRecipe, installPlugin, grantCapability,
@@ -63,6 +66,7 @@ export type HexForgeErrorKind =
   | "DanglingInput"
   | "PluginSignatureInvalid"
   | "PluginCapabilityDenied"
+  | "Cancelled"
   | "Internal";
 
 export interface HexForgeError {

@@ -3,6 +3,7 @@
 
 mod commands;
 mod error;
+mod scheduler;
 mod state;
 
 use state::AppState;

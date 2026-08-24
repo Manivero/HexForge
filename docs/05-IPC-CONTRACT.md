@@ -69,6 +69,7 @@ export type HexForgeErrorKind =
   | "DanglingInput"
   | "PluginSignatureInvalid"
   | "PluginCapabilityDenied"
+  | "Cancelled"
   | "Internal";
 
 export interface HexForgeError {
@@ -151,7 +152,9 @@ export interface RunNodeResponse {
 export interface CancelNodeRequest {
   nodeId: NodeId;
 }
-/** invoke<void>("cancel_node", req) */
+/** invoke<boolean>("cancel_node", req) — кооперативная отмена: true, если
+ *  активный запуск найден и флаг выставлен (one-shot); планировщик завершает
+ *  цепочку ошибкой kind="Cancelled" на ближайшем чекпоинте. */
 
 // ---------- Commands: history / time-travel ----------
 

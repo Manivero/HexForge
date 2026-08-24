@@ -22,6 +22,10 @@ pub enum HexForgeErrorKind {
     DanglingInput,
     PluginSignatureInvalid,
     PluginCapabilityDenied,
+    /// Кооперативная отмена через `cancel_node` (hexforge-stream scheduler).
+    /// Аддитивное расширение TS-объединения `HexForgeErrorKind`
+    /// (src/lib/ipc-contract.ts) — синхронизировано golden-тестом.
+    Cancelled,
     Internal,
 }
 
@@ -91,6 +95,17 @@ impl HexForgeError {
     pub fn internal_for_node(node_id: impl std::fmt::Display, message: impl Into<String>) -> Self {
         Self {
             kind: HexForgeErrorKind::Internal,
+            message: message.into(),
+            field: None,
+            limit_mb: None,
+            node_id: Some(node_id.to_string()),
+        }
+    }
+
+    /// Отмена выполнения узла: `node_id` — запрошенный к отмене узел.
+    pub fn cancelled_for_node(node_id: impl std::fmt::Display, message: impl Into<String>) -> Self {
+        Self {
+            kind: HexForgeErrorKind::Cancelled,
             message: message.into(),
             field: None,
             limit_mb: None,

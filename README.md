@@ -23,6 +23,11 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   ESLint без замечаний
 - ✅ Command Palette (⌘K) — первичный интерфейс, подключён к живому реестру
   операций через типизированный IPC-слой
+- ✅ `hexforge-stream` MVP: планировщик `scheduler.rs` — chunked `apply_chunk`
+  для streamable-операций, memoization (content-addressed LRU, 256MB),
+  кооперативная отмена (`cancel_node` → `Cancelled`), merge-узлы через
+  `MergeTransform` + `streaming.concat`; новый крейт `hexforge-stream`
+  (чистые чанк-примитивы)
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
   источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
   (вертикальный рельс DAG с выбором узлов) → PreviewDock (TEXT/HEX ≤4KB
@@ -52,6 +57,6 @@ npm run tauri dev    # полное нативное приложение
 
 ## Дальше по плану MVP (см. PRD §3)
 
-`hexforge-stream` (chunked-планировщик, N-арные merge-узлы) →
-`GraphCanvas`/`OperationNode` (визуализация DAG) → `HexViewer` (virtualized) →
-Time-Travel UI поверх History → `hexforge-plugin-host` (Wasmtime sandbox).
+Cross-node pipelining и bounded backpressure в планировщике (docs/04 §6) →
+Time-Travel UI (`jump_to_snapshot` поверх History) → `hexforge-plugin-host`
+(Wasmtime sandbox) → CLI-режим (`hexforge-cli`).

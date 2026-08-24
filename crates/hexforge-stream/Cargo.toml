@@ -1,0 +1,9 @@
+[package]
+name = "hexforge-stream"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Осознанно пусто: чистые I/O-примитивы без знания о домене (docs/04 §1).

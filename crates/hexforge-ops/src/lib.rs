@@ -8,18 +8,24 @@
 
 pub mod encoding;
 pub mod hashing;
+pub mod streaming;
 pub mod text;
 
-use hexforge_core::Transform;
+use hexforge_core::{MergeTransform, Transform};
 
 /// `inventory::collect!` реализует свой внутренний трейт для переданного типа —
 /// по правилам сиротства (orphan rules) это обязано быть локальным типом
 /// этого крейта, а не голым `&'static dyn Transform` (трейт `Transform`
 /// определён в `hexforge-core`, чужой для `hexforge-ops`). Регистрация идёт
-/// через тонкую локальную обёртку.
+/// через тонкие локальные обёртки: унарные/базовые операции через
+/// `TransformEntry`, N-арные слияния дополнительно через `MergeEntry`.
 pub struct TransformEntry(pub &'static dyn Transform);
 
 inventory::collect!(TransformEntry);
+
+pub struct MergeEntry(pub &'static dyn MergeTransform);
+
+inventory::collect!(MergeEntry);
 
 /// Строит реестр из всех операций, собранных `inventory` на этапе линковки.
 /// Вызывается один раз при старте процесса (Tauri `setup` hook или CLI `main`).
@@ -27,6 +33,9 @@ pub fn build_registry() -> hexforge_core::TransformRegistry {
     let mut registry = hexforge_core::TransformRegistry::new();
     for entry in inventory::iter::<TransformEntry> {
         registry.register(entry.0);
+    }
+    for entry in inventory::iter::<MergeEntry> {
+        registry.register_merge(entry.0);
     }
     registry
 }

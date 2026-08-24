@@ -2,10 +2,16 @@
 //! встречается с рантаймом (Tauri `State`, потокобезопасные примитивы).
 //! `hexforge-core` сам по себе ничего не знает про `parking_lot`/`tauri::State`.
 
-use hexforge_core::{Graph, History, TransformRegistry};
-use parking_lot::RwLock;
-use std::collections::HashMap;
+use hexforge_core::{Graph, History, NodeId, TransformRegistry};
+use parking_lot::{Mutex, RwLock};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use uuid::Uuid;
+
+/// Токен кооперативной отмены выполнения узла (`cancel_node`): планировщик
+/// опрашивает флаг на чекпоинтах между узлами и между чанками.
+pub type CancellationToken = Arc<AtomicBool>;
 
 /// Источник байтов, на который фронтенд ссылается через непрозрачный
 /// `SourceHandle` (см. `05-IPC-CONTRACT.md`). Никогда не сериализуется
@@ -47,6 +53,80 @@ impl SourceStore {
     }
 }
 
+/// Content-addressed LRU-кэш выходов узлов планировщика (см. scheduler.rs).
+/// Ключ — `reproducibility_key(op@ver :: input_hash :: params)`: инвалидация
+/// не требуется по построению, вытеснение — только по бюджету байтов.
+pub struct OutputCache {
+    entries: HashMap<String, CacheEntry>,
+    /// Порядок доступа для вытеснения старейших: ключи в порядке вставки,
+    /// при hit-переиспользовании порядок не обновляется (детерминизм важнее
+    /// точного LRU; бюджет и так ограничивает worst-case память).
+    order: VecDeque<String>,
+    used_bytes: usize,
+    max_bytes: usize,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+struct CacheEntry {
+    output: Arc<Vec<u8>>,
+}
+
+impl OutputCache {
+    pub fn new(max_bytes: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            used_bytes: 0,
+            max_bytes,
+            hits: 0,
+            misses: 0,
+        }
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<Arc<Vec<u8>>> {
+        match self.entries.get(key) {
+            Some(entry) => {
+                self.hits += 1;
+                Some(Arc::clone(&entry.output))
+            }
+            None => {
+                self.misses += 1;
+                None
+            }
+        }
+    }
+
+    /// Вставляет выход; при превышении бюджета вытесняет старейшие записи,
+    /// включая (при необходимости) саму новую — результат больше кэша полезен
+    /// текущему вызову, но кэшировать его бессмысленно.
+    pub fn put(&mut self, key: String, output: Arc<Vec<u8>>) {
+        let size = output.len();
+        if size > self.max_bytes {
+            return;
+        }
+        while self.used_bytes + size > self.max_bytes {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(evicted) = self.entries.remove(&oldest) {
+                self.used_bytes = self.used_bytes.saturating_sub(evicted.output.len());
+            }
+        }
+        if self.entries.insert(key.clone(), CacheEntry { output }).is_none() {
+            self.used_bytes += size;
+            self.order.push_back(key);
+        }
+    }
+}
+
+/// Дефолтный бюджет кэша выходов: 256 МБ суммарно на промежуточные результаты.
+const DEFAULT_OUTPUT_CACHE_BYTES: usize = 256 * 1024 * 1024;
+
+/// Вместимость реестра активных отмен; одновременных запусков в MVP единицы,
+/// лимит защищает от утечки карт при аномальном фронте.
+const MAX_ACTIVE_CANCELLATIONS: usize = 64;
+
 pub struct AppState {
     pub registry: TransformRegistry,
     pub sources: RwLock<SourceStore>,
@@ -55,16 +135,43 @@ pub struct AppState {
     /// читается `list_snapshots`. Отдельный лок — история и источник байтов
     /// имеют разные времена жизни и никогда не блокируются вложенно.
     pub history: RwLock<History>,
+    /// Content-addressed кэш выходов (memoization планировщика).
+    pub cache: Mutex<OutputCache>,
+    /// Активные кооперативные отмены по запрошенному nodeId. Mutex (не RwLock):
+    /// операции короткие insert/remove/take.
+    pub cancellations: Mutex<HashMap<NodeId, CancellationToken>>,
 }
 
 impl AppState {
     pub fn new(registry: TransformRegistry) -> Self {
+        Self::with_cache_budget(registry, DEFAULT_OUTPUT_CACHE_BYTES)
+    }
+
+    /// Тестовый конструктор с переопределением бюджета кэша.
+    pub fn with_cache_budget(registry: TransformRegistry, cache_max_bytes: usize) -> Self {
         Self {
             registry,
             sources: RwLock::new(SourceStore::default()),
             graph: RwLock::new(Graph::new()),
             history: RwLock::new(History::default()),
+            cache: Mutex::new(OutputCache::new(cache_max_bytes)),
+            cancellations: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Регистрирует токен отмены; `false` = лимит активных запусков исчерпан.
+    pub fn register_cancellation(&self, node_id: NodeId, token: CancellationToken) -> bool {
+        let mut map = self.cancellations.lock();
+        if map.len() >= MAX_ACTIVE_CANCELLATIONS {
+            return false;
+        }
+        map.insert(node_id, token);
+        true
+    }
+
+    /// Снимает и возвращает токен по завершении выполнения (успех/ошибка).
+    pub fn take_cancellation(&self, node_id: &NodeId) -> Option<CancellationToken> {
+        self.cancellations.lock().remove(node_id)
     }
 }
 
@@ -99,5 +206,51 @@ mod tests {
         assert!(state.history.read().snapshots.is_empty());
         assert!(state.graph.read().nodes.is_empty());
         assert!(state.sources.read().get(&Uuid::new_v4()).is_none());
+        let cache = state.cache.lock();
+        assert_eq!((cache.hits, cache.misses), (0, 0));
+        drop(cache);
+        assert!(state.cancellations.lock().is_empty());
+    }
+
+    #[test]
+    fn output_cache_hit_miss_and_eviction() {
+        let mut cache = OutputCache::new(100);
+
+        assert!(cache.get("k1").is_none());
+        assert_eq!(cache.misses, 1);
+
+        cache.put("k1".into(), Arc::new(vec![0; 60]));
+        cache.put("k2".into(), Arc::new(vec![0; 30]));
+        let hit = cache.get("k1").expect("fresh entry must hit");
+        assert_eq!(hit.len(), 60);
+        assert_eq!(cache.hits, 1);
+
+        // Вставка 50 байт при бюджете 100 вытесняет САМЫЙ СТАРЫЙ k1 (60):
+        // 90+50 > 100 → evict k1 → used = 30(k2)+50(k3) = 80 <= 100.
+        cache.put("k3".into(), Arc::new(vec![0; 50]));
+        assert!(
+            cache.get("k1").is_none(),
+            "oldest-inserted entry must be evicted first"
+        );
+        assert!(cache.get("k2").is_some());
+        assert!(cache.get("k3").is_some());
+
+        // Результат больше бюджета не кэшируется вовсе.
+        cache.put("huge".into(), Arc::new(vec![0; 500]));
+        assert!(cache.get("huge").is_none());
+    }
+
+    #[test]
+    fn cancellation_register_take_roundtrip() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let id: NodeId = Uuid::new_v4();
+        let token: CancellationToken = Arc::new(AtomicBool::new(false));
+
+        assert!(state.register_cancellation(id, token.clone()));
+        assert!(Arc::ptr_eq(
+            &state.take_cancellation(&id).expect("token registered"),
+            &token
+        ));
+        assert!(state.take_cancellation(&id).is_none(), "take is one-shot");
     }
 }

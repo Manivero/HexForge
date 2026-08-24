@@ -59,6 +59,7 @@ hexforge/
 | Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | Поток 05-IPC §3: литерал → create_literal_source → debounced set_graph → run_node → preview_bytes; рендер проверен headless-браузером на vite dev (0 ошибок консоли, мягкая деградация без бэкенда); сквозной прогон с реальным invoke — за `npm run tauri dev` |
 | GraphCanvas (вертикальный срез DAG) | ✅ | Рельс + карточки узлов в BFS-порядке от корней, выбор кликом, маркер sourceHandle у корня; раскладка — чистая функция от nodes (замена на полноценный layout без смены API); boot smoke-test нативного бинаря: `[hexforge-core] initialized with 7 operations` |
 | InspectorPanel (FR-3.2) | ✅ | Авто-форма из paramsSchema (string+enum → select, boolean → checkbox, integer/number → number, string → text); onChange → updateNodeParams → debounced set_graph; stale-бейдж превью при мутации графа после запуска (видимая часть FR-1.6) |
+| hexforge-stream MVP (планировщик) | ✅ | Новый крейт chunk-примитивов + `src-tauri/src/scheduler.rs`: chunked `apply_chunk` для streamable-операций (Hex/Rot13, состояние-перенос ниббла у HexDecode), memoization LRU по reproducibility_key (Arc<Vec<u8>>, 256MB), кооперативная отмена (`cancel_node` → kind="Cancelled", чекпоинты между узлами/чанками), merge через `MergeTransform` + операция `streaming.concat` (PRD FR-1.4); 11 тестов планировщика |
 
 ## Как запустить локально
 
@@ -99,20 +100,21 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 38/38 зелёных
-(core 9, ops 7, tauri 22 — включая IPC-parity golden-тесты), `tsc --noEmit` —
-0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка.
-1. `run_node` — async-команда (принцип №2 контракта): рекурсивный исполнитель
-   уходит в `spawn_blocking`, прогресс стримится через `op://progress`
-   по одному событию на завершённый узел. Без мемоизации и chunked-стриминга;
-   полноценный планировщик (`hexforge-stream`) — следующий пункт плана MVP.
-   `previewOnly` принимается по контракту, но режимы пока не различаются
-   (downstream в MVP не пересчитывается вовсе).
-2. `list_plugins`, `cancel_node`, `jump_to_snapshot`,
-   `import_cyberchef_recipe` — контрактные заглушки; `list_snapshots`
-   и `export_recipe`/`import_recipe` реализованы. Реальная отмена потребует
-   нового варианта `Cancelled` в `HexForgeErrorKind` (расширение публичного
-   контракта — согласование).
+Все изменения перепроверены: `cargo test --workspace` — 66/66 зелёных
+(core 9, ops 16, stream 7, tauri 34 — включая IPC-parity golden-тесты и
+тесты планировщика), `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний,
+`vite build` — успешная сборка.
+1. Планировщик MVP (`src-tauri/src/scheduler.rs`): chunked `apply_chunk`
+   внутри streamable-узлов, memoization по reproducibility_key,
+   кооперативная отмена (kind="Cancelled"), merge через MergeTransform
+   (`streaming.concat`, PRD FR-1.4). Cross-node pipelining, bounded
+   backpressure и 64 МБ-чанки FR-5.2 — следующий этап (docs/04 §6).
+   Не-стримовая `apply` непрерываема до возврата (операции не опрашивают
+   ctx.is_cancelled() внутри). `previewOnly` принимается, режимы пока
+   не различаются.
+2. `list_plugins`, `jump_to_snapshot`, `import_cyberchef_recipe` —
+   контрактные заглушки; отмена реализована кооперативно ("Cancelled"
+   добавлен в TS-объединение аддитивно).
 3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
    `npx tauri icon <source.png>`; для смены брендинга повторить команду с
    новым исходником ≥ 1024×1024.

@@ -31,14 +31,30 @@ impl Snapshot {
     /// дают одинаковый результат (при условии `capabilities().deterministic == true`
     /// для соответствующей операции) — используется для дедупликации кэша.
     pub fn reproducibility_key(&self) -> String {
-        format!(
-            "{}@{}::{}::{}",
-            self.operation_id,
-            self.operation_version,
-            self.input_content_hash.to_hex(),
-            self.params
+        reproducibility_key(
+            &self.operation_id,
+            &self.operation_version,
+            &self.input_content_hash.to_hex()[..],
+            &self.params,
         )
     }
+}
+
+/// Свободная функция ключа воспроизводимости — единый формат для снапшотов и
+/// content-addressed кэша планировщика: планировщик считает хэш входа один раз
+/// и использует его и для ключа кэша, и для записи снапшота (без повторного
+/// хеширования). Формат: `op@version :: input_hex :: params` (serde_json Value
+/// печатает детерминированно — ключи объектов отсортированы).
+pub fn reproducibility_key(
+    operation_id: &str,
+    operation_version: &str,
+    input_hash_hex: &str,
+    params: &serde_json::Value,
+) -> String {
+    format!(
+        "{}@{}::{}::{}",
+        operation_id, operation_version, input_hash_hex, params
+    )
 }
 
 /// История — плоское хранилище снапшотов с явными родительскими ссылками,
