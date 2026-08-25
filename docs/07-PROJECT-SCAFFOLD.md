@@ -101,10 +101,11 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 78/78 зелёных
+Все изменения перепроверены: `cargo test --workspace` — 78/78 зелёных (Rust) + 14 FE-юнитов
 (core 9, ops 16, stream 7, engine 23, tauri 19, cli 4 — включая IPC-parity golden-тесты,
 планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
-`tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка.
+`tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка,
+`npm run test:fe` — 14/14 (fuzzyMatch ⌘K + hex-viewer formatting).
 1. Планировщик MVP (крейт `hexforge-engine`): chunked `apply_chunk`
    плюс FUSION стримового суффикса + параллельный конвейер
    (стадия = поток, bounded sync_channel(4): память ≤ stages×4×1МиБ;

@@ -59,7 +59,7 @@ npm run dev          # фронтенд отдельно, http://localhost:1420
 npm run tauri dev    # полное нативное приложение
 ```
 
-Проверки: `npm run lint`, `npm run build`, `cargo test --workspace`.
+Проверки: `npm run lint`, `npm run test:fe`, `npm run build`, `cargo test --workspace`.
 
 CLI-режим (FR-7.3):
 

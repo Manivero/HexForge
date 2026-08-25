@@ -18,6 +18,8 @@ jobs:
       # Гейт качества фронтенда: ESLint (--max-warnings 0) + tsc --noEmit +
       # production-сборка Vite (внутри npm run build).
       - run: npm run lint
+      # Юнит-тесты чистых FE-модулей (node:test, без доп. зависимостей).
+      - run: npm run test:fe
       - run: npm run build
       # NFR-4: ноль известных уязвимостей в production-зависимостях.
       - run: npm audit --omit=dev

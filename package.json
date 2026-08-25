@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "test:fe": "tsc -p tsconfig.fe.json && node --test \"fe-tests/**/*.test.mjs\""
   },
   "dependencies": {
     "@radix-ui/react-context-menu": "^2.2.2",
