@@ -68,5 +68,5 @@ cargo run -p hexforge-cli -- run recipe.hexforge --in input.bin --out output.bin
 ## Дальше по плану MVP (см. PRD §3)
 
 Cross-node pipelining и bounded backpressure в планировщике (docs/04 §6) →
-Ветвление истории от произвольного снапшота → `hexforge-plugin-host`
+Визуализация дерева ветвей истории → `hexforge-plugin-host`
 (Wasmtime sandbox).

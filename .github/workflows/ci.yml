@@ -19,6 +19,8 @@ jobs:
       # production-сборка Vite (внутри npm run build).
       - run: npm run lint
       - run: npm run build
+      # NFR-4: ноль известных уязвимостей в production-зависимостях.
+      - run: npm audit --omit=dev
 
   rust:
     # windows-latest: Tauri v2 на Linux требует системного libwebkit2gtk —
@@ -29,7 +31,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # Юнит-тесты всех крейтов workspace (core, ops, tauri-командный слой,
-      # включая IPC-parity golden-тесты).
+      # Юнит-тесты всех крейтов workspace (core, ops, stream, engine, tauri-слой,
+      # cli — включая IPC-parity golden-тесты и планировщик).
       - run: cargo test --workspace
       - run: cargo build --workspace
+      # NFR-4: аудит Rust-зависимостей против RustSec advisory-db.
+      - run: cargo install cargo-audit --locked --quiet
+      - run: cargo audit --deny warnings

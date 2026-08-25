@@ -27,7 +27,12 @@ export function HistoryPanel() {
           История пуста — запустите узел, чтобы создать первый снапшот.
         </p>
       ) : (
-        <ol className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+        <>
+          <p className="mb-2 text-2xs text-text-muted">
+            Клик — прыжок (реплей lineage). Запуск узла после прыжка создаёт
+            ветку от выбранной точки (FR-4.1).
+          </p>
+          <ol className="flex max-h-56 flex-col gap-1 overflow-y-auto">
           {rows.map((snap, index) => {
             const isJumping = jumpingSnapshotId === snap.id;
             return (
@@ -57,7 +62,8 @@ export function HistoryPanel() {
               </li>
             );
           })}
-        </ol>
+          </ol>
+        </>
       )}
     </section>
   );

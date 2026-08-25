@@ -124,8 +124,10 @@ fn resolve_node(
     );
 
     if let Some(cached) = state.cache.lock().get(&cache_key) {
+        // Cache-hit НЕ пишет новый снапшот: история — граф СОСТОЯНИЙ
+        // (FR-4.2), а состояние узла не изменилось; дубль засорял бы DAG
+        // нулевыми узлами и смещал голову при прыжках.
         emit_progress(on_progress, node_id, cached.len());
-        record_snapshot(&node, state, primary_input_hash, blake3::hash(&cached));
         return Ok(cached);
     }
 
@@ -546,8 +548,9 @@ mod tests {
             assert_eq!(cache.hits, 1, "second run must be a cache hit");
             assert_eq!(cache.misses, misses_after_first);
         }
-        // История фиксирует оба запуска — кэш прозрачен для Time-Travel.
-        assert_eq!(state.history.read().order.len(), 2);
+        // История — граф СОСТОЯНИЙ: повтор идентичного запуска не создаёт
+        // дубликат снапшота (head остаётся на месте).
+        assert_eq!(state.history.read().order.len(), 1);
     }
 
     #[test]
@@ -816,5 +819,71 @@ mod tests {
         let key = snap.reproducibility_key();
         assert!(key.starts_with("text.rot13@1.0.0::"));
         assert!(key.contains(&input_hash.to_hex()[..]));
+    }
+
+    #[test]
+    fn jump_then_new_run_forks_history_dag() {
+        // FR-4.1 ("аналог Git"): после прыжка к снапшоту в середине цепочки
+        // новый запуск обязан породить ВЕТКУ — два снапшота с общим родителем,
+        // а не линейное продолжение старого хвоста.
+        let state = AppState::new(hexforge_ops::build_registry());
+        let root = root_node(&state, b"Hello", "text.rot13");
+        let encode = child(&state, "encoding.base64.encode", root);
+        execute_chain(&state, &encode, &token(), &no_progress).unwrap();
+
+        // Линейная история: root ← encode (родительская ссылка).
+        let (root_snap_id, _tail) = {
+            let history = state.history.read();
+            let snaps = history.ordered_snapshots();
+            (snaps[0].id, snaps[1].id)
+        };
+
+        // Прыжок к корню: голова = корневой снапшот.
+        replay_snapshot(&state, root_snap_id).unwrap();
+        state.history.write().current = Some(root_snap_id);
+
+        // Новый запуск ДРУГОЙ операции от этой головы → ветка.
+        let other = child(&state, "encoding.hex.encode", root);
+        execute_chain(&state, &other, &token(), &no_progress).unwrap();
+
+        let history = state.history.read();
+        assert_eq!(
+            history.order.len(),
+            3,
+            "root + original tail + new branch node"
+        );
+        let branch = &history.snapshots[&history.order[2]];
+        assert_eq!(branch.node_id, other);
+        // Ключевое: родитель нового снапшота — точка прыжка, а не прежний хвост.
+        assert_eq!(branch.parent, Some(root_snap_id));
+
+        // Lineage ветки: root → branch (хвост исходной цепочки не в пути).
+        let lin = history.lineage(branch.id);
+        assert_eq!(lin.len(), 2);
+        assert_eq!(lin[0].id, root_snap_id);
+        assert_eq!(lin[1].id, branch.id);
+
+        // Выход ветки корректен: hex(rot13("Hello")) — хэш от hex-строки.
+        let expected_hex = hex_encode(b"Uryyb");
+        assert_eq!(
+            branch.output_content_hash,
+            Some(blake3::hash(expected_hex.as_slice()))
+        );
+        drop(history);
+
+        // Прыжок в конец новой ветки воспроизводит её результат.
+        let out = replay_snapshot(&state, history_current(&state)).unwrap();
+        assert_eq!(out.as_slice(), expected_hex.as_slice());
+    }
+
+    fn history_current(state: &AppState) -> hexforge_core::SnapshotId {
+        state.history.read().current.expect("history has head")
+    }
+
+    fn hex_encode(data: &[u8]) -> Vec<u8> {
+        data.iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            .into_bytes()
     }
 }
