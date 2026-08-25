@@ -39,6 +39,15 @@ impl Graph {
         Self::default()
     }
 
+    /// Тестово-диагностический конструктор: граф из списка узлов.
+    pub fn from_nodes(nodes: Vec<OperationNode>) -> Self {
+        let mut g = Self::default();
+        for n in nodes {
+            g.insert_node(n);
+        }
+        g
+    }
+
     pub fn insert_node(&mut self, node: OperationNode) {
         self.nodes.insert(node.id, node);
     }

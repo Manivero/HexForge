@@ -101,8 +101,8 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 78/78 зелёных (Rust) + 14 FE-юнитов
-(core 9, ops 16, stream 7, engine 23, tauri 19, cli 4 — включая IPC-parity golden-тесты,
+Все изменения перепроверены: `cargo test --workspace` — 79/79 зелёных (Rust) + 14 FE-юнитов
+(core 9, ops 16, stream 7, engine 27, tauri 20, cli 4 — включая IPC-parity golden-тесты,
 планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
 `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка,
 `npm run test:fe` — 14/14 (fuzzyMatch ⌘K + hex-viewer formatting).

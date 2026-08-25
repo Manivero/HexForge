@@ -94,6 +94,10 @@ interface DataSlice {
   snapshots: SnapshotDto[];
   /** id снапшота, к которому сейчас идёт lineage-реплей. */
   jumpingSnapshotId: SnapshotId | null;
+  /** Серверный stale-набор из события graph://invalidated (FR-1.6):
+   * узлы, чьи результаты устарели после последнего set_graph. */
+  staleNodeIds: NodeId[];
+  applyServerStale: (ids: NodeId[]) => void;
   runError: string | null;
   runSelectedNode: () => Promise<void>;
   /** Кооперативная отмена текущего запуска (cancel_node): планировщик
@@ -292,6 +296,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   hexLoading: false,
   snapshots: [],
   jumpingSnapshotId: null,
+  staleNodeIds: [],
   runError: null,
   runSelectedNode: async () => {
     const nodeId = get().selectedNodeId;
@@ -318,6 +323,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         hexOffset: null,
         hexBytes: null,
         runningNodeId: null,
+        staleNodeIds: get().staleNodeIds.filter((id) => id !== nodeId),
       });
       await loadSnapshots(set);
     } catch (err) {
@@ -372,6 +378,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ hexLoading: false, runError: formatIpcError(err) });
     }
   },
+  applyServerStale: (ids) => set({ staleNodeIds: ids }),
   jumpToSnapshot: async (snapshotId) => {
     set({ jumpingSnapshotId: snapshotId, runError: null });
     try {

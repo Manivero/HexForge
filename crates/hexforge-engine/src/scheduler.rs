@@ -651,6 +651,53 @@ fn execute_fused_parallel(
 }
 
 
+/// Событие инвалидации (`graph://invalidated`, 05-IPC-CONTRACT.md §events):
+/// id узлов, чей кэшированный результат устарел после изменения графа.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphInvalidatedEvent {
+    pub stale_node_ids: Vec<String>,
+}
+
+/// Чистый расчёт stale-набора при замене старого графа новым: узел изменился,
+/// если он новый или у него сменились operation@version/params/inputs.
+/// Stale = сам изменённый ∪ всё достижимое из него по исходящим рёбрам
+/// НОВОГО графа (FR-1.6: точечная инвалидация без пересчёта всего графа).
+pub fn compute_invalidated(
+    old: &hexforge_core::Graph,
+    new: &hexforge_core::Graph,
+) -> Vec<String> {
+    fn fingerprint(n: &hexforge_core::OperationNode) -> String {
+        format!(
+            "{}@{}::{:?}::{:?}",
+            n.operation_id, n.operation_version, n.params, n.inputs
+        )
+    }
+
+    let old_fp: std::collections::HashMap<NodeId, String> =
+        old.nodes.iter().map(|(id, n)| (*id, fingerprint(n))).collect();
+
+    let mut changed: Vec<NodeId> = Vec::new();
+    for (id, n) in new.nodes.iter() {
+        if old_fp.get(id).map(|f| f.as_str()) != Some(fingerprint(n).as_str()) {
+            changed.push(*id);
+        }
+    }
+    if changed.is_empty() {
+        return Vec::new();
+    }
+
+    // Объединение downstream всех изменённых узлов; BTreeSet даёт
+    // детерминированный порядок на проводе (HashMap-порядок не течёт).
+    let mut stale: std::collections::BTreeSet<String> = Default::default();
+    for c in changed {
+        for id in new.downstream_of(c) {
+            stale.insert(id.to_string());
+        }
+    }
+    stale.into_iter().collect()
+}
+
 fn emit_progress(
     on_progress: ProgressSink<'_>,
     node_id: &NodeId,
@@ -852,6 +899,7 @@ pub(crate) fn record_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use crate::error::HexForgeErrorKind;
     use crate::state::{AppState, SourceEntry};
     use base64::{engine::general_purpose, Engine as _};
@@ -1426,6 +1474,85 @@ mod tests {
             .collect::<String>()
             .into_bytes();
         assert_eq!(out.as_slice(), expected_hex.as_slice());
+    }
+
+    fn mk_node(id: NodeId, op: &str, params: serde_json::Value, inputs: Vec<NodeId>) -> OperationNode {
+        OperationNode {
+            id,
+            operation_id: op.into(),
+            operation_version: "1.0.0".into(),
+            params,
+            inputs,
+        }
+    }
+
+    #[test]
+    fn compute_invalidated_params_change_marks_downstream_only() {
+        // root → mid → sink; меняем params ТОЛЬКО у root:
+        // stale = {root, mid, sink} (всё downstream), ничего лишнего.
+        let (a, b, c) = (NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4());
+        let old = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a, "text.rot13", json!({}), vec![]),
+            mk_node(b, "encoding.hex.encode", json!({}), vec![a]),
+            mk_node(c, "encoding.base64.encode", json!({}), vec![b]),
+        ]);
+        let new = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a, "text.rot13", json!({"k": 1}), vec![]),
+            mk_node(b, "encoding.hex.encode", json!({}), vec![a]),
+            mk_node(c, "encoding.base64.encode", json!({}), vec![b]),
+        ]);
+
+        let stale = compute_invalidated(&old, &new);
+        // Порядок события детерминирован (лексикографический по id-строке).
+        let mut expect = vec![a.to_string(), b.to_string(), c.to_string()];
+        expect.sort();
+        assert_eq!(stale, expect);
+    }
+
+    #[test]
+    fn compute_invalidated_untouched_branch_stays_fresh() {
+        // fork: root → A и root → B; меняем ветку A — ветка B не затронута.
+        let (r, a, b) = (NodeId::new_v4(), NodeId::new_v4(), NodeId::new_v4());
+        let nodes_old = || {
+            hexforge_core::Graph::from_nodes(vec![
+                mk_node(r, "text.rot13", json!({}), vec![]),
+                mk_node(a, "encoding.hex.encode", json!({}), vec![r]),
+                mk_node(b, "encoding.hex.encode", json!({}), vec![r]),
+            ])
+        };
+        let nodes_new = hexforge_core::Graph::from_nodes(vec![
+            mk_node(r, "text.rot13", json!({}), vec![]),
+            mk_node(a, "encoding.hex.encode", json!({"upper": true}), vec![r]),
+            mk_node(b, "encoding.hex.encode", json!({}), vec![r]),
+        ]);
+
+        let stale = compute_invalidated(&nodes_old(), &nodes_new);
+        assert_eq!(stale, vec![a.to_string()]);
+    }
+
+    #[test]
+    fn compute_invalidates_new_and_op_changed_but_not_identical() {
+        let (a, b) = (NodeId::new_v4(), NodeId::new_v4());
+        let old = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a, "text.rot13", json!({}), vec![]),
+        ]);
+        // b — новый узел; a не изменился.
+        let new = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a, "text.rot13", json!({}), vec![]),
+            mk_node(b, "encoding.hex.encode", json!({}), vec![a]),
+        ]);
+        let stale = compute_invalidated(&old, &new);
+        assert_eq!(stale, vec![b.to_string()]);
+    }
+
+    #[test]
+    fn compute_invalidated_no_changes_empty() {
+        let (a, b) = (NodeId::new_v4(), NodeId::new_v4());
+        let g = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a, "text.rot13", json!({}), vec![]),
+            mk_node(b, "encoding.hex.encode", json!({}), vec![a]),
+        ]);
+        assert!(compute_invalidated(&g, &g).is_empty());
     }
 
     #[test]

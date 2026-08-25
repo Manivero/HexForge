@@ -11,6 +11,7 @@
 //                    streamable-операций; memoization по reproducibility_key;
 //                    merge-узлы через MergeTransform/streaming.concat;
 //                    события op://progress; Snapshot в History за каждый узел),
+//                    setGraph (+ эмит graph://invalidated со staleNodeIds),
 //                    cancelNode (кооперативная отмена, kind="Cancelled"),
 //                    listSnapshots, exportRecipe, importRecipe,
 //                    jumpToSnapshot (lineage-реплей из корневого источника,

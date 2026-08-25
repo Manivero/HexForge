@@ -238,13 +238,32 @@ pub struct SetGraphRequest {
     pub graph: GraphDto,
 }
 
+/// Контракт docs/05 §3: после валидации DAG бэкенд считает stale-набор
+/// (изменённые узлы ∪ их downstream) и эмитит graph://invalidated —
+/// фронтенд подсвечивает устаревшие узлы без локальной эвристики.
 #[tauri::command]
-pub fn set_graph(req: SetGraphRequest, state: State<Arc<AppState>>) -> HexForgeResult<()> {
+pub async fn set_graph(
+    req: SetGraphRequest,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
+) -> HexForgeResult<()> {
+    let old_graph = state.graph.read().clone();
     let graph: Graph = req.graph.try_into()?;
     // Валидация DAG до принятия графа — узел с циклом никогда не попадёт
     // в состояние приложения (FR "граф всегда ациклический").
     graph.topo_order().map_err(HexForgeError::from)?;
+
+    let stale = scheduler::compute_invalidated(&old_graph, &graph);
     *state.graph.write() = graph;
+
+    if !stale.is_empty() {
+        use tauri::Emitter;
+        // Ошибка доставки сознательно игнорируется: нет слушателя — не беда.
+        let _ = app.emit(
+            "graph://invalidated",
+            hexforge_engine::scheduler::GraphInvalidatedEvent { stale_node_ids: stale },
+        );
+    }
     Ok(())
 }
 
@@ -960,6 +979,26 @@ mod tests {
                 "signatureValid": true,
                 "requestedCapabilities": ["filesystem_read"],
                 "grantedCapabilities": [],
+            })
+        );
+    }
+
+    #[test]
+    fn graph_invalidated_event_matches_ts_contract() {
+        use hexforge_engine::scheduler::GraphInvalidatedEvent;
+        let ev = GraphInvalidatedEvent {
+            stale_node_ids: vec![
+                "00000000-0000-4000-8000-00000000000b".into(),
+                "00000000-0000-4000-8000-00000000000c".into(),
+            ],
+        };
+        assert_eq!(
+            serde_json::to_value(&ev).unwrap(),
+            serde_json::json!({
+                "staleNodeIds": [
+                    "00000000-0000-4000-8000-00000000000b",
+                    "00000000-0000-4000-8000-00000000000c"
+                ],
             })
         );
     }

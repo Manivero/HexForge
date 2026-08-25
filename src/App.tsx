@@ -31,6 +31,35 @@ export function App() {
     document.documentElement.classList.toggle("light", theme === "light");
   }, [theme]);
 
+  // Серверная инвалидация (FR-1.6, docs/05 §3): Rust считает downstream
+  // изменённых узлов и эмитит graph://invalidated после set_graph.
+  // В dev-режиме вне Tauri listen недоступен — деградирует молча.
+  const applyServerStale = useAppStore((s) => s.applyServerStale);
+  React.useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<{ staleNodeIds: string[] }>("graph://invalidated", (event) => {
+          applyServerStale(event.payload.staleNodeIds);
+        }),
+      )
+      .then((un) => {
+        if (cancelled) {
+          un();
+        } else {
+          unlisten = un;
+        }
+      })
+      .catch(() => {
+        /* без нативного бэкенда события недоступны */
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [applyServerStale]);
+
   const nodeCount = Object.keys(nodes).length;
   const selectedNode = selectedNodeId ? nodes[selectedNodeId] : undefined;
 

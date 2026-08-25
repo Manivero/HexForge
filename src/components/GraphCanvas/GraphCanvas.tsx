@@ -50,8 +50,13 @@ export function GraphCanvas() {
   const selectedNodeId = useAppStore((s) => s.selectedNodeId);
   const selectNode = useAppStore((s) => s.selectNode);
   const runningNodeId = useAppStore((s) => s.runningNodeId);
+  const staleNodeIds = useAppStore((s) => s.staleNodeIds);
 
   const order = React.useMemo(() => layoutOrder(nodes), [nodes]);
+  const staleSet = React.useMemo(
+    () => new Set(staleNodeIds),
+    [staleNodeIds],
+  );
 
   return (
     // Рельс слева: непрерывная вертикальная линия через все узлы цепочки.
@@ -68,6 +73,7 @@ export function GraphCanvas() {
           if (!node) return null;
           const isSelected = id === selectedNodeId;
           const isRunning = id === runningNodeId;
+          const isStale = staleSet.has(id);
           const sourceHandle =
             typeof node.params === "object" &&
             node.params !== null &&
@@ -106,6 +112,9 @@ export function GraphCanvas() {
                     {node.operationId}
                     {isRunning && (
                       <span className="ml-2 text-status-running">running…</span>
+                    )}
+                    {isStale && !isRunning && (
+                      <span className="ml-2 text-status-stale">stale</span>
                     )}
                   </span>
                   <span className="text-2xs text-text-muted">

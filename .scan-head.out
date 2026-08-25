@@ -1,0 +1,13 @@
+1 "//! Реализация Tauri commands. Каждая структура запроса/ответа здесь —"
+2 "//! зеркало соответствующего типа в `src/lib/ipc-contract.ts`"
+3 "//! (см. `05-IPC-CONTRACT.md`). `#[serde(rename_all = \"camelCase\")]`"
+4 "//! обеспечивает совпадение имён полей с TS без ручного маппинга."
+5 ""
+6 "use hexforge_engine::graph_dto::GraphDto;"
+7 "use hexforge_engine::error::{HexForgeError, HexForgeResult};"
+8 "use hexforge_engine::scheduler;"
+9 "use hexforge_engine::state::{AppState, SourceEntry};"
+10 "use base64::{engine::general_purpose, Engine as _};"
+11 "use hexforge_core::graph::Graph;"
+12 "use serde::{Deserialize, Serialize};"
+total 1201
