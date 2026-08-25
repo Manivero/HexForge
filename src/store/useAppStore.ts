@@ -14,6 +14,7 @@ import {
   previewBytes as ipcPreviewBytes,
   listSnapshots as ipcListSnapshots,
   jumpToSnapshot as ipcJumpToSnapshot,
+  cancelNode as ipcCancelNode,
   decodeBase64Chunk,
 } from "@/lib/ipc";
 import { HexForgeCommandError } from "@/lib/ipc-contract";
@@ -90,6 +91,9 @@ interface DataSlice {
   jumpingSnapshotId: SnapshotId | null;
   runError: string | null;
   runSelectedNode: () => Promise<void>;
+  /** Кооперативная отмена текущего запуска (cancel_node): планировщик
+   * завершит цепочку ошибкой Cancelled на ближайшем чекпоинте. */
+  cancelRunningNode: () => Promise<void>;
   jumpToSnapshot: (snapshotId: SnapshotId) => Promise<void>;
 }
 
@@ -314,6 +318,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewHex: null,
         previewTruncated: false,
       });
+    }
+  },
+  cancelRunningNode: async () => {
+    const nodeId = get().runningNodeId;
+    if (!nodeId) {
+      return;
+    }
+    // Ответ самой команды (true/false — был ли найден запуск) не важен:
+    // исход виден по завершению runSelectedNode (ошибка Cancelled).
+    try {
+      await ipcCancelNode(nodeId);
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
     }
   },
   jumpToSnapshot: async (snapshotId) => {

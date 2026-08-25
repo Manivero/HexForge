@@ -96,6 +96,11 @@ impl OutputCache {
         }
     }
 
+    /// Число живых записей (диагностика/тесты).
+    pub fn entries_len(&self) -> usize {
+        self.entries.len()
+    }
+
     pub fn get(&mut self, key: &str) -> Option<Arc<Vec<u8>>> {
         match self.entries.get(key) {
             Some(entry) => {

@@ -69,18 +69,28 @@ pub struct History {
     /// Не является структурой ветвления: ветвление выражено только полями
     /// `parent`, `order` — хронология журнала.
     pub order: Vec<SnapshotId>,
+    /// Индекс воспроизводимости: key → снапшот. Повторное состояние
+    /// (тот же op@ver :: input :: params) НЕ порождает новый узел DAG —
+    /// история остаётся графом уникальных состояний (FR-4.2).
+    #[serde(default)]
+    pub by_key: std::collections::HashMap<String, SnapshotId>,
     pub current: Option<SnapshotId>,
 }
 
 impl History {
     pub fn record(&mut self, snapshot: Snapshot) {
         let id = snapshot.id;
+        let key = snapshot.reproducibility_key();
         self.current = Some(id);
-        // Повторная запись того же id — это замена существующего снапшота,
-        // а не новое событие: в `order` он дублироваться не должен.
         if self.snapshots.insert(id, snapshot).is_none() {
             self.order.push(id);
+            self.by_key.insert(key, id);
         }
+    }
+
+    /// Существующий снапшот с идентичным ключом воспроизводимости, если есть.
+    pub fn find_by_key(&self, key: &str) -> Option<SnapshotId> {
+        self.by_key.get(key).copied()
     }
 
     /// Путь от корня до данного снапшота — последовательность операций,

@@ -283,8 +283,10 @@ inventory::submit! { &Base64Decode as &dyn Transform }
 >   (`ProgressSink`), а не через `tauri::AppHandle`.
 > - Chunked-исполнение: streamable-узлы исполняются чанками `apply_chunk`
 >   над zero-copy срезами входа; per-node состояние — `Box<dyn Any>`,
->   засеивается операцией при первом чанке. Cross-node pipelining,
->   bounded backpressure (mpsc) и 64 МБ-чанки FR-5.2 — следующий этап.
+>   засеивается операцией при первом чанке. Смежные streamable-узлы
+>   сливаются в один чанк-цикл (fusion): промежуточные буферы не
+>   материализуются, кэшируется только финальная стадия прогона.
+>   Осталось: параллельный вариант с bounded mpsc и 64 МБ-чанки FR-5.2.
 > - Memoization: content-addressed LRU-кэш выходов по
 >   `reproducibility_key(op@ver :: input_hash :: params)` (см. §4),
 >   значения `Arc<Vec<u8>>`, бюджет по байтам (дефолт 256 МБ).

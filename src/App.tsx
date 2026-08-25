@@ -21,6 +21,7 @@ export function App() {
   const openPalette = useAppStore((s) => s.openPalette);
   const runSelectedNode = useAppStore((s) => s.runSelectedNode);
   const runningNodeId = useAppStore((s) => s.runningNodeId);
+  const cancelRunningNode = useAppStore((s) => s.cancelRunningNode);
   const runError = useAppStore((s) => s.runError);
   const sourceHandle = useAppStore((s) => s.sourceHandle);
   const snapshots = useAppStore((s) => s.snapshots);
@@ -71,6 +72,18 @@ export function App() {
                     ⌘K
                   </kbd>
                 </button>
+                {runningNodeId && (
+                  <button
+                    onClick={() => void cancelRunningNode()}
+                    className={[
+                      "rounded-md border border-status-error bg-surface-1 px-3 py-1.5 text-xs",
+                      "text-status-error transition-colors duration-fast ease-out-expo",
+                      "hover:border-status-error hover:text-text-primary",
+                    ].join(" ")}
+                  >
+                    Cancel
+                  </button>
+                )}
                 <button
                   onClick={() => void runSelectedNode()}
                   disabled={!selectedNodeId || runningNodeId !== null}

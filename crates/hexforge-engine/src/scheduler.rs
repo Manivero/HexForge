@@ -94,6 +94,17 @@ fn resolve_node(
         })?
     };
 
+    // Cross-node streaming (docs/04 §6): streamable single-input узел
+    // пытается втянуть вверх по цепочке максимальный стримовый прогон —
+    // промежуточные выходы живут размером с чанк, полный буфер только у
+    // последней стадии. Всё остальное (merge, non-streamable, корни)
+    // исполняется универсальным путём ниже.
+    if node.inputs.len() == 1 {
+        if let Some(fusion) = build_stream_fusion(state, &node)? {
+            return execute_fused_run(state, fusion, token, on_progress);
+        }
+    }
+
     // Входы: 0 — источник из SourceStore, 1 — рекурсивный выход родителя,
     // N — merge-ветка (порядок inputs — часть контракта операции).
     let inputs: Vec<Arc<Vec<u8>>> = match node.inputs.len() {
@@ -127,6 +138,9 @@ fn resolve_node(
         // Cache-hit НЕ пишет новый снапшот: история — граф СОСТОЯНИЙ
         // (FR-4.2), а состояние узла не изменилось; дубль засорял бы DAG
         // нулевыми узлами и смещал голову при прыжках.
+        // История — граф состояний: повтор идентичного запуска переиспользует
+        // существующий снапшот (head остаётся), не создавая дубль.
+        record_output(&node, state, primary_input_hash, blake3::hash(&cached));
         emit_progress(on_progress, node_id, cached.len());
         return Ok(cached);
     }
@@ -139,7 +153,7 @@ fn resolve_node(
 
     state.cache.lock().put(cache_key, Arc::clone(&output));
     emit_progress(on_progress, node_id, output.len());
-    record_snapshot(&node, state, primary_input_hash, blake3::hash(&output));
+    record_output(&node, state, primary_input_hash, blake3::hash(&output));
 
     Ok(output)
 }
@@ -208,7 +222,11 @@ fn execute_unary_node(
     let caps = transform.capabilities();
 
     if !caps.streamable {
-        let ctx: &dyn ExecutionContext = &NullExecutionContext;
+        // Токен отмены обязан доходить и до не-стримовых операций:
+        // долгая apply() опрашивает ctx.is_cancelled() на своих чекпоинтах.
+        let ctx: &dyn ExecutionContext = &RunContext {
+            token: Arc::clone(token),
+        };
         let result = transform.apply(Cow::Borrowed(input.as_slice()), &node.params, ctx);
         return match result {
             Ok(view) => Ok(Arc::new(view.into_owned())),
@@ -278,6 +296,160 @@ fn execute_merge_node(
         Err(e) => Err(HexForgeError::from(e)),
     }
 }
+
+// ---------- Cross-node streaming fusion (docs/04 §6) ----------
+
+/// Одна стадия слитного стримового прогона.
+struct FusionStage {
+    node: OperationNode,
+    transform: &'static dyn hexforge_core::Transform,
+    input_hasher: blake3::Hasher,
+    output_hasher: blake3::Hasher,
+    state: Box<dyn std::any::Any>,
+}
+
+/// Собирает максимальный прогон streamable single-input узлов, заканчивающийся
+/// в `node`. Возвращает стадии снизу-вверх и идентификатор базы (узел, чей
+/// выход материализуется обычным путём), либо `None`, если узел сам не
+/// streamable. Границы прогона: корень-источник, non-streamable операция,
+/// merge-узел или отсутствующий родитель.
+fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult<Option<FusedRun>> {
+    let top = lookup_transform(node, state)?;
+    if !top.capabilities().streamable {
+        return Ok(None);
+    }
+
+    let mut stages: Vec<FusionStage> = vec![FusionStage {
+        node: node.clone(),
+        transform: top,
+        input_hasher: blake3::Hasher::new(),
+        output_hasher: blake3::Hasher::new(),
+        state: Box::new(()),
+    }];
+
+    let mut cursor = node.clone();
+    let base_parent: Option<NodeId> = loop {
+        if cursor.inputs.len() != 1 {
+            break None; // база — сам источник (root)
+        }
+        let parent_id = cursor.inputs[0];
+        let parent = {
+            let graph = state.graph.read();
+            graph.nodes.get(&parent_id).cloned()
+        };
+        let Some(parent) = parent else {
+            break Some(parent_id); // висячий вход — пусть общий путь отрапортует
+        };
+        let p_transform = lookup_transform(&parent, state)?;
+        if !p_transform.capabilities().streamable {
+            // Родитель не-streamable: его полный выход станет входом прогона.
+            break Some(parent_id);
+        }
+        stages.push(FusionStage {
+            node: parent.clone(),
+            transform: p_transform,
+            input_hasher: blake3::Hasher::new(),
+            output_hasher: blake3::Hasher::new(),
+            state: Box::new(()),
+        });
+        cursor = parent;
+    };
+
+    stages.reverse(); // снизу-вверх: первая стадия потребляет базовый буфер
+    Ok(Some(FusedRun { stages, base_parent }))
+}
+
+struct FusedRun {
+    stages: Vec<FusionStage>,
+    /// Родитель первой стадии; `None` — база является source-root.
+    base_parent: Option<NodeId>,
+}
+
+/// Исполняет слитный прогон одним вложенным чанк-циклом:
+/// внешний итератор — чанки базового буфера, внутренний — стадии.
+/// Промежуточные выходы живут размером с чанк; полные буферы — только у
+/// последней стадии (результат) и у базового входа.
+///
+/// Memoization внутри прогона: per-stage выходы не материализуются, поэтому
+/// кэшируется ТОЛЬКО финальная стадия; снапшоты истории пишутся за каждую
+/// стадию по инкрементальным blake3-хэшам границ (FR-4.2 без буферизации).
+fn execute_fused_run(
+    state: &AppState,
+    mut run: FusedRun,
+    token: &CancellationToken,
+    on_progress: ProgressSink<'_>,
+) -> HexForgeResult<Arc<Vec<u8>>> {
+    check_cancelled(&run.stages[0].node.id, token)?;
+
+    // Базовый вход: выход родителя первой стадии либо байты источника.
+    let base_input: Arc<Vec<u8>> = match run.base_parent {
+        Some(parent_id) => resolve_node(&parent_id, state, token, on_progress)?,
+        None => {
+            let first = run.stages[0].node.clone();
+            resolve_source_input(&first, &first.id, state)?
+        }
+    };
+
+    // Входные/выходные хэши всех стадий кормятся в чанк-цикле равномерно
+    // (пре-фид первой стадии дал бы двойной учёт базового буфера).
+
+    let ranges = chunk_ranges(base_input.len(), hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES);
+    let effective_ranges: &[(usize, usize)] = if ranges.is_empty() {
+        &[(0, 0)]
+    } else {
+        &ranges
+    };
+
+    let mut final_output: Vec<u8> = Vec::with_capacity(base_input.len());
+    let ctx_run = RunContext {
+        token: Arc::clone(token),
+    };
+
+    for (index, (start, end)) in effective_ranges.iter().copied().enumerate() {
+        check_cancelled(&run.stages[run.stages.len() - 1].node.id, token)?;
+        let is_last_chunk = index + 1 == effective_ranges.len();
+
+        let mut piece: Vec<u8> = base_input[start..end].to_vec();
+        for stage in run.stages.iter_mut() {
+            stage.input_hasher.update(piece.as_slice());
+            piece = stage.transform.apply_chunk(
+                piece.as_slice(),
+                is_last_chunk,
+                &mut stage.state,
+                &stage.node.params,
+                &ctx_run,
+            )?;
+            stage.output_hasher.update(piece.as_slice());
+        }
+        final_output.extend_from_slice(piece.as_slice());
+    }
+
+    // Финализация: снапшот на каждую стадию + кэш только для последней.
+    let last_index = run.stages.len() - 1;
+    let mut final_cached: Option<(String, Arc<Vec<u8>>)> = None;
+    for (i, stage) in run.stages.iter().enumerate() {
+        let input_hash = stage.input_hasher.finalize();
+        let output_hash = stage.output_hasher.finalize();
+        record_output(&stage.node, state, input_hash, output_hash);
+
+        if i == last_index {
+            let key = hexforge_core::reproducibility_key(
+                &stage.node.operation_id,
+                &stage.node.operation_version,
+                &input_hash.to_hex()[..],
+                &stage.node.params,
+            );
+            let arc = Arc::new(final_output.clone());
+            state.cache.lock().put(key.clone(), Arc::clone(&arc));
+            final_cached = Some((key, arc));
+        }
+    }
+
+    let (_, out) = final_cached.expect("last stage always sets output");
+    emit_progress(on_progress, &run.stages[last_index].node.id, out.len());
+    Ok(out)
+}
+
 
 fn emit_progress(
     on_progress: ProgressSink<'_>,
@@ -448,15 +620,33 @@ pub(crate) fn build_snapshot(
 /// произвольной точки появится вместе с UI Time-Travel (структура History уже
 /// DAG-ready). Локи берутся последовательно и не вложены в graph/sources —
 /// порядок захвата всегда history → (graph|sources), дедлок невозможен.
-pub(crate) fn record_snapshot(
+/// Пишет снапшот результата стадии/узла с дедупликацией по ключу
+/// воспроизводимости: повторное состояние НЕ создаёт новый узел DAG —
+/// голова истории переезжает на существующий снапшот (FR-4.2).
+/// Возвращает id актуального снапшота состояния.
+pub(crate) fn record_output(
     node: &OperationNode,
     state: &AppState,
     input_hash: blake3::Hash,
     output_hash: blake3::Hash,
-) {
-    let parent = state.history.read().current;
-    let snapshot = build_snapshot(node, parent, input_hash, output_hash);
+) -> hexforge_core::SnapshotId {
+    let key = hexforge_core::reproducibility_key(
+        &node.operation_id,
+        &node.operation_version,
+        &input_hash.to_hex()[..],
+        &node.params,
+    );
+    // ВАЖНО: результат read-guard ограничен отдельной инструкцией —
+    // if let со скрутини протянул бы guard в write-ветку (дедлок).
+    let existing = { state.history.read().find_by_key(&key) };
+    if let Some(existing) = existing {
+        state.history.write().current = Some(existing);
+        return existing;
+    }
+    let snapshot = build_snapshot(node, state.history.read().current, input_hash, output_hash);
+    let id = snapshot.id;
     state.history.write().record(snapshot);
+    id
 }
 
 #[cfg(test)]
@@ -467,6 +657,7 @@ mod tests {
     use base64::{engine::general_purpose, Engine as _};
     use hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES;
     use std::sync::atomic::AtomicBool;
+    use hexforge_core::{ByteView, TransformError};
 
     fn no_progress(_event: &super::ProgressEvent) {}
 
@@ -648,7 +839,6 @@ mod tests {
 
     #[test]
     fn merge_concat_executes_two_branches_in_order() {
-        use base64::Engine as _;
 
         // Ветка A: hex.decode("4865") => "He"
         // Ветка B: rot13("y!")     => "l!"
@@ -821,6 +1011,100 @@ mod tests {
         assert!(key.contains(&input_hash.to_hex()[..]));
     }
 
+    /// Операция, опрашивающая ctx.is_cancelled() внутри apply и «взводящая»
+    /// флаг при входе: тест-наблюдатель ждёт взведения и только тогда отменяет,
+    /// гарантируя, что сигнал проверяется ИМЕННО внутри долгого apply.
+    struct CancelAwareOp {
+        armed: Arc<AtomicBool>,
+    }
+
+    impl hexforge_core::Transform for CancelAwareOp {
+        fn id(&self) -> &'static str {
+            "test.cancel-aware"
+        }
+        fn version(&self) -> &'static str {
+            "1.0.0"
+        }
+        fn display_name(&self) -> &'static str {
+            "CancelAware"
+        }
+        fn category(&self) -> &'static str {
+            "Test"
+        }
+        fn capabilities(&self) -> hexforge_core::TransformCapabilities {
+            hexforge_core::TransformCapabilities {
+                deterministic: true,
+                streamable: false,
+                memory_cost: hexforge_core::MemoryCost::FullBuffer,
+            }
+        }
+        fn apply<'a>(
+            &self,
+            _input: ByteView<'a>,
+            _params: &serde_json::Value,
+            ctx: &dyn ExecutionContext,
+        ) -> Result<ByteView<'a>, TransformError> {
+            self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            // Активное ожидание сигнала с yield: детерминированно ловит проводку
+            // токена независимо от параллельности тестов.
+            let mut iters: u64 = 0;
+            loop {
+                if ctx.is_cancelled() {
+                    return Err(TransformError::Internal("cancelled inside apply".into()));
+                }
+                iters += 1;
+                if iters > 100_000_000 {
+                    return Err(TransformError::Internal(
+                        "op finished without observing cancellation".into(),
+                    ));
+                }
+                if iters % 1024 == 0 {
+                    std::thread::yield_now();
+                }
+                let _ = std::hint::black_box(iters);
+            }
+        }
+    }
+
+    #[test]
+    fn cancellation_reaches_transform_context_mid_apply() {
+        let mut state = AppState::new(hexforge_ops::build_registry());
+        let armed = Arc::new(AtomicBool::new(false));
+        let op: &'static CancelAwareOp =
+            Box::leak(Box::new(CancelAwareOp { armed: Arc::clone(&armed) }));
+        state.registry.register(op);
+        let root = root_node(&state, &[0u8; 4096], "test.cancel-aware");
+
+        let token = Arc::new(AtomicBool::new(false));
+
+        // Наблюдатель: как только операция вошла в apply — отменяем.
+        let watcher_token = Arc::clone(&token);
+        let watcher_arm = Arc::clone(&armed);
+        let handle = std::thread::spawn(move || {
+            let mut spins = 0u64;
+            while !watcher_arm.load(std::sync::atomic::Ordering::SeqCst) {
+                spins += 1;
+                if spins > 500_000_000 {
+                    panic!("cancel-aware op never started");
+                }
+                std::hint::spin_loop();
+                if spins % 4096 == 0 {
+                    std::thread::yield_now();
+                }
+            }
+            watcher_token.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let err = execute_chain(&state, &root, &token, &no_progress).unwrap_err();
+        handle.join().expect("watcher must not panic");
+
+        // Ошибка пришла ИЗ операции (Internal с её сообщением), а не от
+        // чекпоинта планировщика — значит RunContext дотянулся внутрь apply.
+        assert_eq!(err.kind, HexForgeErrorKind::Internal);
+        assert!(err.message.contains("cancelled inside apply"));
+        assert!(state.history.read().order.is_empty());
+    }
+
     #[test]
     fn jump_then_new_run_forks_history_dag() {
         // FR-4.1 ("аналог Git"): после прыжка к снапшоту в середине цепочки
@@ -886,4 +1170,57 @@ mod tests {
             .collect::<String>()
             .into_bytes()
     }
+    #[test]
+    fn fused_stream_run_multi_chunk_correct_and_cached_once() {
+        // rot13 → hex.encode: ОБЕ стадии streamable → слияние в один чанк-цикл
+        // над входом больше 1 МиБ (несколько чанков на стадию).
+
+        let big: Vec<u8> = b"aBcD"
+            .iter()
+            .copied()
+            .cycle()
+            .take(hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES + 1234)
+            .collect();
+        let rotated: Vec<u8> = big
+            .iter()
+            .map(|b| match b {
+                b'a'..=b'z' => b'a' + (b - b'a' + 13) % 26,
+                b'A'..=b'Z' => b'A' + (b - b'A' + 13) % 26,
+                other => *other,
+            })
+            .collect();
+        let expected_hex: Vec<u8> = rotated
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            .into_bytes();
+
+        let state = AppState::new(hexforge_ops::build_registry());
+        let root = root_node(&state, &big, "text.rot13");
+        let enc = child(&state, "encoding.hex.encode", root);
+
+        let out = execute_chain(&state, &enc, &token(), &no_progress).unwrap();
+        assert_eq!(out.as_slice(), expected_hex.as_slice());
+
+        // История: по снапшоту на каждую стадию, вход ветки сшит с выходом
+        // предыдущей (инкрементальные хэши корректны).
+        {
+            let history = state.history.read();
+            assert_eq!(history.order.len(), 2);
+            let snaps = history.ordered_snapshots();
+            assert_eq!(snaps[0].output_content_hash, Some(snaps[1].input_content_hash));
+        }
+
+        // Кэш: только финальная стадия материализуется и пишется; повторный
+        // запуск слитного прогона пересчитывает его (trade-off fusion —
+        // ключ финальной стадии известен лишь после исполнения).
+        execute_chain(&state, &enc, &token(), &no_progress).unwrap();
+        let cache = state.cache.lock();
+        assert_eq!(cache.hits, 0);
+        assert_eq!(cache.misses, 0, "fusion исполняется без чтения кэша (trade-off)");
+        // Но запись в кэше есть — ею воспользуется НЕ-слитный путь
+        // (например merge/не-streamable потребитель через get()).
+        assert_eq!(cache.entries_len(), 1);
+    }
+
 }

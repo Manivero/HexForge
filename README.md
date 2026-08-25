@@ -30,7 +30,8 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   крейт `hexforge-engine`, чанк-примитивы — в крейт `hexforge-stream`
 - ✅ Time-Travel (FR-4): `jump_to_snapshot` — lineage-реплей из корневого
   источника с верификацией content-hash'ей и переносом головы истории;
-  HistoryPanel (newest-first, клик = прыжок)
+  HistoryPanel — дерево по parent-ссылкам с маркерами ветвления,
+  клик = прыжок; кнопка Cancel активирует кооперативную отмену из UI
 - ✅ `hexforge-cli` (FR-7.3): `hexforge-cli run recipe.hexforge --in file
   --out file` на том же движке без GUI; формат рецепта = GraphDto JSON
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
@@ -68,5 +69,5 @@ cargo run -p hexforge-cli -- run recipe.hexforge --in input.bin --out output.bin
 ## Дальше по плану MVP (см. PRD §3)
 
 Cross-node pipelining и bounded backpressure в планировщике (docs/04 §6) →
-Визуализация дерева ветвей истории → `hexforge-plugin-host`
+`hexforge-plugin-host`
 (Wasmtime sandbox).

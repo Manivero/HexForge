@@ -100,12 +100,13 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 74/74 зелёных
-(core 9, ops 16, stream 7, engine 19, tauri 19, cli 4 — включая IPC-parity golden-тесты,
-планировщик, lineage-реплей и форк истории после прыжка), `tsc --noEmit` — 0 ошибок,
-`eslint` — 0 замечаний, `vite build` — успешная сборка.
+Все изменения перепроверены: `cargo test --workspace` — 76/76 зелёных
+(core 9, ops 16, stream 7, engine 21, tauri 19, cli 4 — включая IPC-parity golden-тесты,
+планировщик, lineage-реплей, форк истории и fusion streamable-прогонов),
+`tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка.
 1. Планировщик MVP (крейт `hexforge-engine`): chunked `apply_chunk`
-   внутри streamable-узлов, memoization по reproducibility_key,
+   плюс FUSION стримового суффикса цепочки (промежуточные выходы размером
+   с чанк; кэшируется только финальная стадия); внутри, memoization по reproducibility_key,
    кооперативная отмена (kind="Cancelled"), merge через MergeTransform
    (`streaming.concat`, PRD FR-1.4). Cross-node pipelining, bounded
    backpressure и 64 МБ-чанки FR-5.2 — следующий этап (docs/04 §6).
@@ -118,7 +119,7 @@ npm run tauri dev
    InvalidInput; расхождение выхода → Internal, недетерминизм запрещён
    FR-4.2) и переносит голову истории; HistoryPanel на фронте инициирует
    прыжки; форк после прыжка покрыт тестом jump_then_new_run_forks_history_dag.
-   Осталась визуализация дерева ветвей в UI.
+   HistoryPanel рендерит дерево истории по parent-ссылкам (DFS, маркеры ветвления).
 3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
    `npx tauri icon <source.png>`; для смены брендинга повторить команду с
    новым исходником ≥ 1024×1024.
