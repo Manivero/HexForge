@@ -36,7 +36,7 @@ impl Transform for HexEncode {
         &self,
         chunk: &[u8],
         _is_last: bool,
-        _state: &mut Box<dyn std::any::Any>,
+        _state: &mut Box<dyn std::any::Any + Send>,
         _params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
@@ -97,7 +97,7 @@ impl Transform for HexDecode {
         &self,
         chunk: &[u8],
         is_last: bool,
-        state: &mut Box<dyn std::any::Any>,
+        state: &mut Box<dyn std::any::Any + Send>,
         _params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
@@ -167,7 +167,7 @@ mod tests {
     fn chunked_decode_pairs_nibbles_across_boundaries() {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({});
-        let mut state: Box<dyn std::any::Any> = Box::new(());
+        let mut state: Box<dyn std::any::Any + Send> = Box::new(());
 
         let first = HexDecode
             .apply_chunk(b"4 8", false, &mut state, &params, &ctx)
@@ -191,7 +191,7 @@ mod tests {
     fn chunked_decode_rejects_odd_total_length() {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({});
-        let mut state: Box<dyn std::any::Any> = Box::new(());
+        let mut state: Box<dyn std::any::Any + Send> = Box::new(());
 
         HexDecode
             .apply_chunk(b"4", false, &mut state, &params, &ctx)
@@ -209,7 +209,7 @@ mod tests {
 
         let whole = HexEncode.apply(Cow::Borrowed(b"deadbeef"), &params, &ctx).unwrap();
 
-        let mut state: Box<dyn std::any::Any> = Box::new(());
+        let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
         for (i, part) in [b"de".as_slice(), b"ad", b"be", b"ef"].iter().enumerate() {
             chunked.extend_from_slice(

@@ -45,7 +45,7 @@ impl Transform for Rot13 {
         &self,
         chunk: &[u8],
         _is_last: bool,
-        _state: &mut Box<dyn std::any::Any>,
+        _state: &mut Box<dyn std::any::Any + Send>,
         _params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
@@ -82,7 +82,7 @@ mod tests {
 
         let whole = Rot13.apply(Cow::Borrowed(input), &params, &ctx).unwrap();
 
-        let mut state: Box<dyn std::any::Any> = Box::new(());
+        let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
         for (i, part) in [b"Spl".as_slice(), b"it ", b"Me", b" 123"].iter().enumerate() {
             chunked.extend_from_slice(

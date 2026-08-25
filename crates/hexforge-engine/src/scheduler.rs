@@ -20,9 +20,10 @@ use crate::error::{HexForgeError, HexForgeResult};
 use crate::state::{AppState, CancellationToken};
 use hexforge_core::graph::{NodeId, OperationNode};
 use hexforge_core::transform::{ExecutionContext, NullExecutionContext};
-use hexforge_stream::chunk_ranges;
+use hexforge_stream::{chunk_ranges, DEFAULT_CHUNK_SIZE_BYTES};
 use serde::Serialize;
 use std::borrow::Cow;
+use parking_lot::Mutex as StageMutex;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,6 +38,15 @@ pub struct ProgressEvent {
     pub bytes_processed: u64,
     pub bytes_total: Option<u64>,
 }
+
+/// Параллельный конвейер включается для прогонов с ≥2 стадиями и входом
+/// больше этого порога; иначе — последовательный путь (без накладных
+/// расходов на потоки для мелких данных).
+const PARALLEL_PIPELINE_MIN_BYTES: usize = DEFAULT_CHUNK_SIZE_BYTES;
+
+/// Ёмкость bounded-канала между стадиями: backpressure ограничивает память
+/// величиной stages × capacity × chunk_size (docs/04 §6).
+const PIPELINE_CHANNEL_CAPACITY: usize = 4;
 
 /// Получатель событий прогресса планировщика (GUI: emit в WebView,
 /// CLI: stderr/ничего). Ошибки доставки — забота реализации колбэка.
@@ -244,7 +254,7 @@ fn execute_unary_node(
     } else {
         &ranges
     };
-    let mut chunk_state: Box<dyn std::any::Any> = Box::new(());
+    let mut chunk_state: Box<dyn std::any::Any + Send> = Box::new(());
     let mut accumulated: Vec<u8> = Vec::new();
     for (index, (start, end)) in effective_ranges.iter().enumerate() {
         check_cancelled(&node.id, token)?;
@@ -305,7 +315,7 @@ struct FusionStage {
     transform: &'static dyn hexforge_core::Transform,
     input_hasher: blake3::Hasher,
     output_hasher: blake3::Hasher,
-    state: Box<dyn std::any::Any>,
+    state: Box<dyn std::any::Any + Send>,
 }
 
 /// Собирает максимальный прогон streamable single-input узлов, заканчивающийся
@@ -319,13 +329,13 @@ fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult
         return Ok(None);
     }
 
-    let mut stages: Vec<FusionStage> = vec![FusionStage {
+    let mut stages: Vec<Arc<StageMutex<FusionStage>>> = vec![Arc::new(StageMutex::new(FusionStage {
         node: node.clone(),
         transform: top,
         input_hasher: blake3::Hasher::new(),
         output_hasher: blake3::Hasher::new(),
         state: Box::new(()),
-    }];
+    }))];
 
     let mut cursor = node.clone();
     let base_parent: Option<NodeId> = loop {
@@ -345,13 +355,13 @@ fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult
             // Родитель не-streamable: его полный выход станет входом прогона.
             break Some(parent_id);
         }
-        stages.push(FusionStage {
+        stages.push(Arc::new(StageMutex::new(FusionStage {
             node: parent.clone(),
             transform: p_transform,
             input_hasher: blake3::Hasher::new(),
             output_hasher: blake3::Hasher::new(),
             state: Box::new(()),
-        });
+        })));
         cursor = parent;
     };
 
@@ -360,7 +370,7 @@ fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult
 }
 
 struct FusedRun {
-    stages: Vec<FusionStage>,
+    stages: Vec<Arc<StageMutex<FusionStage>>>,
     /// Родитель первой стадии; `None` — база является source-root.
     base_parent: Option<NodeId>,
 }
@@ -373,25 +383,43 @@ struct FusedRun {
 /// Memoization внутри прогона: per-stage выходы не материализуются, поэтому
 /// кэшируется ТОЛЬКО финальная стадия; снапшоты истории пишутся за каждую
 /// стадию по инкрементальным blake3-хэшам границ (FR-4.2 без буферизации).
+/// Диспетчер слитного прогона: разрешает базовый вход и выбирает стратегию —
+/// параллельный конвейер (≥2 стадий и большой вход) либо последовательный
+/// цикл (малые данные/одна стадия: без накладных расходов на потоки).
 fn execute_fused_run(
     state: &AppState,
-    mut run: FusedRun,
+    run: FusedRun,
     token: &CancellationToken,
     on_progress: ProgressSink<'_>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
-    check_cancelled(&run.stages[0].node.id, token)?;
+    let first_stage_id = { run.stages[0].lock().node.id };
+    check_cancelled(&first_stage_id, token)?;
 
     // Базовый вход: выход родителя первой стадии либо байты источника.
     let base_input: Arc<Vec<u8>> = match run.base_parent {
         Some(parent_id) => resolve_node(&parent_id, state, token, on_progress)?,
         None => {
-            let first = run.stages[0].node.clone();
+            let first = { run.stages[0].lock().node.clone() };
             resolve_source_input(&first, &first.id, state)?
         }
     };
 
-    // Входные/выходные хэши всех стадий кормятся в чанк-цикле равномерно
-    // (пре-фид первой стадии дал бы двойной учёт базового буфера).
+    if run.stages.len() >= 2 && base_input.len() > PARALLEL_PIPELINE_MIN_BYTES {
+        execute_fused_parallel(state, run, base_input, token, on_progress)
+    } else {
+        execute_fused_sequential(state, run, base_input, token, on_progress)
+    }
+}
+
+/// Последовательный вариант fusion: один поток, чанк проходит все стадии
+/// подряд; промежуточные буферы размером с чанк.
+fn execute_fused_sequential(
+    state: &AppState,
+    run: FusedRun,
+    base_input: Arc<Vec<u8>>,
+    token: &CancellationToken,
+    on_progress: ProgressSink<'_>,
+) -> HexForgeResult<Arc<Vec<u8>>> {
 
     let ranges = chunk_ranges(base_input.len(), hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES);
     let effective_ranges: &[(usize, usize)] = if ranges.is_empty() {
@@ -406,47 +434,219 @@ fn execute_fused_run(
     };
 
     for (index, (start, end)) in effective_ranges.iter().copied().enumerate() {
-        check_cancelled(&run.stages[run.stages.len() - 1].node.id, token)?;
+        let last_stage_id = { run.stages[run.stages.len() - 1].lock().node.id };
+        check_cancelled(&last_stage_id, token)?;
         let is_last_chunk = index + 1 == effective_ranges.len();
 
         let mut piece: Vec<u8> = base_input[start..end].to_vec();
-        for stage in run.stages.iter_mut() {
-            stage.input_hasher.update(piece.as_slice());
-            piece = stage.transform.apply_chunk(
-                piece.as_slice(),
-                is_last_chunk,
-                &mut stage.state,
-                &stage.node.params,
-                &ctx_run,
-            )?;
-            stage.output_hasher.update(piece.as_slice());
+        for stage in run.stages.iter() {
+            // ВАЖНО: guard ограничен блоком (урок про read-guard/if-let).
+            {
+                let mut st = stage.lock();
+                st.input_hasher.update(piece.as_slice());
+                // Клон параметров разделяет займы state/node (мелочь на фоне чанка).
+                let params = st.node.params.clone();
+                piece = st.transform.apply_chunk(
+                    piece.as_slice(),
+                    is_last_chunk,
+                    &mut st.state,
+                    &params,
+                    &ctx_run,
+                )?;
+                st.output_hasher.update(piece.as_slice());
+            }
         }
         final_output.extend_from_slice(piece.as_slice());
     }
 
-    // Финализация: снапшот на каждую стадию + кэш только для последней.
-    let last_index = run.stages.len() - 1;
+    let out = finalize_fused(state, &run.stages, final_output);
+    let last_stage_id = { run.stages[run.stages.len() - 1].lock().node.id };
+    emit_progress(on_progress, &last_stage_id, out.len());
+    Ok(out)
+}
+
+/// Общая финализация прогона (последовательного и параллельного):
+/// снапшот на каждую стадию по инкрементальным хэшам + кэш только для
+/// последней стадии.
+fn finalize_fused(
+    state: &AppState,
+    stages: &[Arc<StageMutex<FusionStage>>],
+    final_output: Vec<u8>,
+) -> Arc<Vec<u8>> {
+    let last_index = stages.len() - 1;
     let mut final_cached: Option<(String, Arc<Vec<u8>>)> = None;
-    for (i, stage) in run.stages.iter().enumerate() {
-        let input_hash = stage.input_hasher.finalize();
-        let output_hash = stage.output_hasher.finalize();
-        record_output(&stage.node, state, input_hash, output_hash);
+    for (i, stage) in stages.iter().enumerate() {
+        let st = stage.lock();
+        let input_hash = st.input_hasher.finalize();
+        let output_hash = st.output_hasher.finalize();
+        record_output(&st.node, state, input_hash, output_hash);
 
         if i == last_index {
             let key = hexforge_core::reproducibility_key(
-                &stage.node.operation_id,
-                &stage.node.operation_version,
+                &st.node.operation_id,
+                &st.node.operation_version,
                 &input_hash.to_hex()[..],
-                &stage.node.params,
+                &st.node.params,
             );
             let arc = Arc::new(final_output.clone());
             state.cache.lock().put(key.clone(), Arc::clone(&arc));
             final_cached = Some((key, arc));
         }
     }
+    final_cached.expect("last stage always sets output").1
+}
 
-    let (_, out) = final_cached.expect("last stage always sets output");
-    emit_progress(on_progress, &run.stages[last_index].node.id, out.len());
+/// Параллельный конвейер: каждая стадия — отдельный поток, чанки идут через
+/// bounded `sync_channel(cap)` → память ограничена stages × cap × chunk_size,
+/// pull потребителя даёт backpressure. Ошибки операций и отмена передаются
+ /// Err-сообщением вниз по цепочке; выход воркера роняет его sender и каскадно
+/// закрывает апстрим.
+fn execute_fused_parallel(
+    state: &AppState,
+    run: FusedRun,
+    base_input: Arc<Vec<u8>>,
+    token: &CancellationToken,
+    on_progress: ProgressSink<'_>,
+) -> HexForgeResult<Arc<Vec<u8>>> {
+    use std::sync::mpsc;
+
+    type ChunkMsg = Result<(Vec<u8>, bool), HexForgeError>;
+
+    let stages_len = run.stages.len();
+    let mut txs: Vec<Option<mpsc::SyncSender<ChunkMsg>>> =
+        Vec::with_capacity(stages_len + 1);
+    let mut rxs: Vec<Option<mpsc::Receiver<ChunkMsg>>> =
+        Vec::with_capacity(stages_len + 1);
+    for _ in 0..=stages_len {
+        let (tx, rx) = mpsc::sync_channel::<ChunkMsg>(PIPELINE_CHANNEL_CAPACITY);
+        txs.push(Some(tx));
+        rxs.push(Some(rx));
+    }
+
+    // Воркер на стадию: состояние/хэшеры стадии живут только в этом потоке.
+    let mut handles = Vec::with_capacity(stages_len);
+    for (i, stage_arc) in run.stages.iter().enumerate() {
+        let stage = Arc::clone(stage_arc);
+        let rx = rxs[i]
+            .take()
+            .expect("each stage consumes its own receiver once");
+        let tx = txs[i + 1]
+            .take()
+            .expect("each stage owns its out-sender once");
+        let token = Arc::clone(token);
+        handles.push(std::thread::spawn(move || {
+            let ctx = RunContext { token };
+            loop {
+                // Воркер НЕ инжектирует собственную отмену: сигнал обязаны
+                // видеть операции через ctx (иначе гонка «кто первым увидел»
+                // подменяет ошибку операции на безликий Cancelled).
+                match rx.recv() {
+                    Ok(Ok((chunk, is_last))) => {
+                        let Some(mut st) = stage.try_lock() else {
+                            let _ = tx.send(Err(HexForgeError::internal(
+                                "pipeline stage lock unavailable",
+                            )));
+                            return;
+                        };
+                        st.input_hasher.update(chunk.as_slice());
+                        let params = st.node.params.clone();
+                        let applied = st.transform.apply_chunk(
+                            chunk.as_slice(),
+                            is_last,
+                            &mut st.state,
+                            &params,
+                            &ctx,
+                        );
+                        match applied {
+                            Ok(piece) => {
+                                st.output_hasher.update(piece.as_slice());
+                                drop(st);
+                                if tx.send(Ok((piece, is_last))).is_err() {
+                                    return; // потребитель завершился — shutdown
+                                }
+                                if is_last {
+                                    return;
+                                }
+                            }
+                            Err(te) => {
+                                drop(st);
+                                let _ = tx.send(Err(HexForgeError::from(te)));
+                                return;
+                            }
+                        }
+                    },
+                    Ok(Err(e)) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                    Err(_) => return, // апстрим закрылся — shutdown
+                }
+            }
+        }));
+    }
+
+    // Main: кормит базовые чанки в первую стадию и собирает выход последней.
+    drop(rxs[0].take());
+    let ranges = chunk_ranges(base_input.len(), hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES);
+    let effective_ranges: &[(usize, usize)] = if ranges.is_empty() {
+        &[(0, 0)]
+    } else {
+        &ranges
+    };
+    'feed: for (index, (start, end)) in effective_ranges.iter().copied().enumerate() {
+        if token.load(Ordering::Relaxed) {
+            break 'feed;
+        }
+        let msg: ChunkMsg = Ok((
+            base_input[start..end].to_vec(),
+            index + 1 == effective_ranges.len(),
+        ));
+        let first_tx = txs[0]
+            .as_ref()
+            .expect("main feed sender taken once");
+        if first_tx.send(msg).is_err() {
+            break 'feed;
+        }
+    }
+    // вход исчерпан: первая стадия доработает и закроет цепочку.
+    // (take() вместо drop: SyncSender не Copy — забираем по значению.)
+    let _ = txs[0].take();
+
+    let mut final_output: Vec<u8> = Vec::new();
+    let mut pipe_err: Option<HexForgeError> = None;
+    let final_rx = rxs[stages_len]
+        .take()
+        .expect("final receiver taken once");
+    while let Ok(msg) = final_rx.recv() {
+        match msg {
+            Ok((piece, is_last)) => {
+                final_output.extend_from_slice(piece.as_slice());
+                if is_last {
+                    break;
+                }
+            }
+            Err(e) => {
+                pipe_err = Some(e);
+                break;
+            }
+        }
+    }
+
+    // Закрыть все каналы: воркеры дренируют/завершаются, join гарантирует,
+    // что хэшеры стадий долиты до финализации истории.
+    drop(txs);
+    drop(rxs);
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    if let Some(e) = pipe_err {
+        return Err(e);
+    }
+
+    let out = finalize_fused(state, &run.stages, final_output);
+    let last_stage_id = { run.stages[stages_len - 1].lock().node.id };
+    emit_progress(on_progress, &last_stage_id, out.len());
     Ok(out)
 }
 
@@ -1103,6 +1303,129 @@ mod tests {
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("cancelled inside apply"));
         assert!(state.history.read().order.is_empty());
+    }
+
+    /// Стримовая версия cancel-aware операции: чекпоинт в каждом чанке.
+    struct CancelAwareStreamOp {
+        armed: Arc<AtomicBool>,
+    }
+
+    impl hexforge_core::Transform for CancelAwareStreamOp {
+        fn id(&self) -> &'static str {
+            "test.cancel-stream"
+        }
+        fn version(&self) -> &'static str {
+            "1.0.0"
+        }
+        fn display_name(&self) -> &'static str {
+            "CancelStream"
+        }
+        fn category(&self) -> &'static str {
+            "Test"
+        }
+        fn capabilities(&self) -> hexforge_core::TransformCapabilities {
+            hexforge_core::TransformCapabilities {
+                deterministic: true,
+                streamable: true,
+                memory_cost: hexforge_core::MemoryCost::PerChunk,
+            }
+        }
+        fn apply<'a>(
+            &self,
+            input: ByteView<'a>,
+            _params: &serde_json::Value,
+            ctx: &dyn ExecutionContext,
+        ) -> Result<ByteView<'a>, TransformError> {
+            self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            if ctx.is_cancelled() {
+                return Err(TransformError::Internal("cancelled inside apply".into()));
+            }
+            Ok(Cow::Owned(input.to_vec()))
+        }
+        fn apply_chunk(
+            &self,
+            chunk: &[u8],
+            _is_last: bool,
+            _state: &mut Box<dyn std::any::Any + Send>,
+            _params: &serde_json::Value,
+            ctx: &dyn ExecutionContext,
+        ) -> Result<Vec<u8>, TransformError> {
+            self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+            if ctx.is_cancelled() {
+                return Err(TransformError::Internal("cancelled inside apply".into()));
+            }
+            Ok(chunk.to_vec())
+        }
+    }
+
+    #[test]
+    fn parallel_pipeline_propagates_mid_apply_cancellation() {
+        // rot13 → cancel-stream: обе стадии streamable, вход > порога →
+        // параллельный конвейер. Отмена выставляется наблюдателем ПОСЛЕ входа
+        // в apply второй стадии; ошибка обязана прийти из операции через
+        // канал, а не от чекпоинта планировщика.
+        let big: Vec<u8> =
+            vec![7u8; hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES + 999];
+
+        let mut state = AppState::new(hexforge_ops::build_registry());
+        let armed = Arc::new(AtomicBool::new(false));
+        let op: &'static CancelAwareStreamOp =
+            Box::leak(Box::new(CancelAwareStreamOp { armed: Arc::clone(&armed) }));
+        state.registry.register(op);
+
+        let root = root_node(&state, &big, "text.rot13");
+        let cs = child(&state, "test.cancel-stream", root);
+
+        let token = Arc::new(AtomicBool::new(false));
+        let watcher_token = Arc::clone(&token);
+        let watcher_arm = Arc::clone(&armed);
+        let handle = std::thread::spawn(move || {
+            let mut spins = 0u64;
+            while !watcher_arm.load(std::sync::atomic::Ordering::SeqCst) {
+                spins += 1;
+                if spins > 200_000_000 {
+                    panic!("stream op never started");
+                }
+                std::hint::spin_loop();
+                if spins % 4096 == 0 {
+                    std::thread::yield_now();
+                }
+            }
+            watcher_token.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let err = execute_chain(&state, &cs, &token, &no_progress).unwrap_err();
+        handle.join().expect("watcher must not panic");
+
+        assert_eq!(err.kind, HexForgeErrorKind::Internal);
+        assert!(err.message.contains("cancelled inside apply"));
+        assert!(state.history.read().order.is_empty());
+    }
+
+    #[test]
+    fn sequential_fusion_small_input_matches_reference() {
+        // Вход меньше порога → диспетчер выбирает последовательный fusion;
+        // результат обязан совпадать с прямым вычислением.
+
+        let state = AppState::new(hexforge_ops::build_registry());
+        let root = root_node(&state, b"small", "text.rot13");
+        let enc = child(&state, "encoding.hex.encode", root);
+
+        let out = execute_chain(&state, &enc, &token(), &no_progress).unwrap();
+        let rotated: Vec<u8> = b"small"
+            .iter()
+            .map(|b| match b {
+                b'a'..=b'z' => b'a' + (b - b'a' + 13) % 26,
+                b'A'..=b'Z' => b'A' + (b - b'A' + 13) % 26,
+                other => *other,
+            })
+            .collect();
+        let expected_hex: Vec<u8> = rotated
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            .into_bytes();
+        assert_eq!(out.as_slice(), expected_hex.as_slice());
     }
 
     #[test]

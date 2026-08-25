@@ -101,13 +101,15 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 76/76 зелёных
-(core 9, ops 16, stream 7, engine 21, tauri 19, cli 4 — включая IPC-parity golden-тесты,
-планировщик, lineage-реплей, форк истории и fusion streamable-прогонов),
+Все изменения перепроверены: `cargo test --workspace` — 78/78 зелёных
+(core 9, ops 16, stream 7, engine 23, tauri 19, cli 4 — включая IPC-parity golden-тесты,
+планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
 `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка.
 1. Планировщик MVP (крейт `hexforge-engine`): chunked `apply_chunk`
-   плюс FUSION стримового суффикса цепочки (промежуточные выходы размером
-   с чанк; кэшируется только финальная стадия); внутри, memoization по reproducibility_key,
+   плюс FUSION стримового суффикса + параллельный конвейер
+   (стадия = поток, bounded sync_channel(4): память ≤ stages×4×1МиБ;
+   промежуточные выходы размером с чанк; кэшируется финальная стадия);
+   внутри, memoization по reproducibility_key,
    кооперативная отмена (kind="Cancelled"), merge через MergeTransform
    (`streaming.concat`, PRD FR-1.4). Cross-node pipelining, bounded
    backpressure и 64 МБ-чанки FR-5.2 — следующий этап (docs/04 §6).

@@ -135,7 +135,7 @@ pub trait Transform: Send + Sync {
         &self,
         chunk: &[u8],
         is_last: bool,
-        state: &mut Box<dyn Any>,
+        state: &mut Box<dyn Any + Send>,
         params: &serde_json::Value,
         ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {

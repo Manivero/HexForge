@@ -286,7 +286,8 @@ inventory::submit! { &Base64Decode as &dyn Transform }
 >   засеивается операцией при первом чанке. Смежные streamable-узлы
 >   сливаются в один чанк-цикл (fusion): промежуточные буферы не
 >   материализуются, кэшируется только финальная стадия прогона.
->   Осталось: параллельный вариант с bounded mpsc и 64 МБ-чанки FR-5.2.
+>   Параллельный режим реализован: стадия = поток, bounded sync_channel(4)
+>   между стадиями (память ≤ stages×cap×chunk). Осталось: 64 МБ-чанки FR-5.2.
 > - Memoization: content-addressed LRU-кэш выходов по
 >   `reproducibility_key(op@ver :: input_hash :: params)` (см. §4),
 >   значения `Arc<Vec<u8>>`, бюджет по байтам (дефолт 256 МБ).
