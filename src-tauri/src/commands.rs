@@ -3,16 +3,17 @@
 //! (см. `05-IPC-CONTRACT.md`). `#[serde(rename_all = "camelCase")]`
 //! обеспечивает совпадение имён полей с TS без ручного маппинга.
 
-use crate::error::{HexForgeError, HexForgeResult};
-use crate::scheduler;
-use crate::state::{AppState, SourceEntry};
+use hexforge_engine::graph_dto::GraphDto;
+use hexforge_engine::error::{HexForgeError, HexForgeResult};
+use hexforge_engine::scheduler;
+use hexforge_engine::state::{AppState, SourceEntry};
 use base64::{engine::general_purpose, Engine as _};
-use hexforge_core::graph::{Graph, NodeId, OperationNode};
+use hexforge_core::graph::Graph;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tauri::State;
+use tauri::{Emitter, State};
 use uuid::Uuid;
 
 /// Верификационная команда моста Rust<->React для Этапа 2 ("greet").
@@ -231,46 +232,6 @@ fn parse_handle(raw: &str) -> HexForgeResult<Uuid> {
 
 // ---------- Граф ----------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OperationNodeDto {
-    pub id: String,
-    pub operation_id: String,
-    pub operation_version: String,
-    pub params: serde_json::Value,
-    pub inputs: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphDto {
-    pub nodes: std::collections::HashMap<String, OperationNodeDto>,
-}
-
-impl TryFrom<GraphDto> for Graph {
-    type Error = HexForgeError;
-
-    fn try_from(dto: GraphDto) -> Result<Self, Self::Error> {
-        let mut graph = Graph::new();
-        for (_id, node) in dto.nodes {
-            let id: NodeId = parse_handle(&node.id)?;
-            let inputs = node
-                .inputs
-                .iter()
-                .map(|s| parse_handle(s))
-                .collect::<Result<Vec<_>, _>>()?;
-            graph.insert_node(OperationNode {
-                id,
-                operation_id: node.operation_id,
-                operation_version: node.operation_version,
-                params: node.params,
-                inputs,
-            });
-        }
-        Ok(graph)
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetGraphRequest {
@@ -329,7 +290,7 @@ pub async fn run_node(
 
     // Кооперативная отмена: токен живёт в AppState до завершения запуска;
     // cancel_node находит его по запрошенному nodeId и выставляет флаг.
-    let token: crate::state::CancellationToken = Arc::new(AtomicBool::new(false));
+    let token: hexforge_engine::state::CancellationToken = Arc::new(AtomicBool::new(false));
     if !exec_state.register_cancellation(node_id, Arc::clone(&token)) {
         return Err(HexForgeError::invalid_input(
             "too many concurrent node executions; cancel a running node first",
@@ -343,7 +304,11 @@ pub async fn run_node(
     let task_token = Arc::clone(&token);
     let task_state = Arc::clone(&exec_state);
     let output = tauri::async_runtime::spawn_blocking(move || {
-        scheduler::execute_chain(&task_state, &node_id, &task_token, Some(&app))
+        // Прогресс уходит в WebView; ошибка доставки сознательно игнорируется.
+        let on_progress = |event: &hexforge_engine::scheduler::ProgressEvent| {
+            let _ = app.emit("op://progress", event);
+        };
+        scheduler::execute_chain(&task_state, &node_id, &task_token, &on_progress)
     })
     .await
     .map_err(|e| HexForgeError::internal(format!("node execution worker failed: {e}")))??;
@@ -619,7 +584,9 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::HexForgeErrorKind;
+    use hexforge_core::graph::{NodeId, OperationNode};
+    use hexforge_engine::graph_dto::OperationNodeDto;
+    use hexforge_engine::error::HexForgeErrorKind;
 
     #[test]
     fn detect_mime_known_magic_bytes() {
@@ -695,6 +662,8 @@ mod tests {
         (root_id, encode_id)
     }
 
+    fn no_progress(_event: &hexforge_engine::scheduler::ProgressEvent) {}
+
     fn fresh_token() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         Arc::new(AtomicBool::new(false))
     }
@@ -710,7 +679,7 @@ mod tests {
         let expected_b64 = general_purpose::STANDARD.encode(&rot13_hello);
 
         let output =
-            scheduler::execute_chain(&state, &encode_id, &fresh_token(), None)
+            scheduler::execute_chain(&state, &encode_id, &fresh_token(), &no_progress)
                 .expect("chain must execute");
         assert_eq!(output.as_slice(), expected_b64.into_bytes().as_slice());
 
@@ -768,7 +737,7 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), None).unwrap_err();
+        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("version mismatch"));
         assert_eq!(err.node_id.as_deref(), Some(node_id.to_string().as_str()));
@@ -789,7 +758,7 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), None).unwrap_err();
+        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("unknown operation"));
     }
@@ -803,7 +772,7 @@ mod tests {
 
     #[test]
     fn error_wire_format_matches_ts_contract() {
-        use crate::error::HexForgeErrorKind;
+        use hexforge_engine::error::HexForgeErrorKind;
 
         let err = HexForgeError::invalid_parameter("utf8", "too large");
         assert_eq!(
@@ -997,7 +966,7 @@ mod tests {
 
     #[test]
     fn progress_event_matches_ts_contract() {
-        use crate::scheduler::ProgressEvent;
+        use hexforge_engine::scheduler::ProgressEvent;
         let ev = ProgressEvent {
             node_id: "00000000-0000-4000-8000-00000000000a".into(),
             bytes_processed: 42,

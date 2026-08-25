@@ -9,9 +9,10 @@ hexforge/
 │   ├── hexforge-core/             # Domain model: Transform trait, Node, Graph, Snapshot. Zero I/O, zero UI knowledge.
 │   ├── hexforge-ops/               # Конкретные операции (impl Transform), сгруппированные по категориям через features
 │   ├── hexforge-stream/            # Chunked I/O, mmap, zero-copy slicing, backpressure
+│   ├── hexforge-engine/            # Исполнитель: AppState, планировщик (execute_chain/replay_snapshot), OutputCache, отмена. Без Tauri.
 │   ├── hexforge-plugin-host/       # Wasmtime runtime, capability sandbox, plugin manifest/signature verification
 │   └── hexforge-cli/               # Тонкий бинарь: recipe runner без GUI, использует те же крейты, что и src-tauri
-└── src-tauri/                      # Tauri shell: commands.rs — единственное место, знающее и про Tauri, и про hexforge-core
+└── src-tauri/                      # Tauri shell: commands.rs — единственное место, знающее и про Tauri, и про движок
 ```
 
 Правило зависимостей (однонаправленное, без циклов):
@@ -275,11 +276,11 @@ inventory::submit! { &Base64Decode as &dyn Transform }
 > - `hexforge-stream` — чистые чанк-примитивы без знания о домене
 >   (`chunk_ranges`, `DEFAULT_CHUNK_SIZE_BYTES` = 1 МиБ), правило зависимостей
 >   из §1 соблюдено буквально.
-> - Планировщик графа живёт в `src-tauri/src/scheduler.rs`: он обязан знать
->   домен (реестр, кэш, история), и вынос в отдельный крейт сейчас означал бы
->   цикл зависимостей либо дублирование типов. Это осознанное отклонение от
->   буквы этого раздела; путь миграции — выделение планировщика в крейт после
->   стабилизации контракта `hexforge-plugin-host`.
+> - Планировщик графа живёт в крейте `hexforge-engine` вместе с
+>   `AppState`/кэшем/отменой: ему нужен домен, а переиспользование одним и тем
+>   же исполнителем в GUI (`src-tauri`) и CLI (FR-7.3) требует крейта без
+>   Tauri-зависимостей. Прогресс отдаётся хосту через callback
+>   (`ProgressSink`), а не через `tauri::AppHandle`.
 > - Chunked-исполнение: streamable-узлы исполняются чанками `apply_chunk`
 >   над zero-copy срезами входа; per-node состояние — `Box<dyn Any>`,
 >   засеивается операцией при первом чанке. Cross-node pipelining,

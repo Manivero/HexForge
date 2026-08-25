@@ -2,9 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
-mod error;
-mod scheduler;
-mod state;
+
+use hexforge_engine::state;
 
 use state::AppState;
 

@@ -1,0 +1,20 @@
+[package]
+name = "hexforge-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hexforge-cli"
+path = "src/main.rs"
+
+[dependencies]
+hexforge-core = { path = "../hexforge-core" }
+hexforge-engine = { path = "../hexforge-engine" }
+hexforge-ops = { path = "../hexforge-ops" }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+base64 = "0.22"

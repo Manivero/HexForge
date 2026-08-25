@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/hexforge-cli",
     "crates/hexforge-core",
+    "crates/hexforge-engine",
     "crates/hexforge-ops",
     "crates/hexforge-stream",
     "src-tauri",

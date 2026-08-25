@@ -10,18 +10,18 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 hexforge-core = { path = "../crates/hexforge-core" }
+hexforge-engine = { path = "../crates/hexforge-engine" }
 hexforge-ops = { path = "../crates/hexforge-ops" }
-hexforge-stream = { path = "../crates/hexforge-stream" }
+
 tauri = { version = "2", features = [] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "fs"] }
-thiserror = { workspace = true }
-memmap2 = "0.9"
 base64 = "0.22"
-parking_lot = "0.12"
-blake3 = { workspace = true }
+memmap2 = "0.9"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+
+[dev-dependencies]
+blake3 = { workspace = true }

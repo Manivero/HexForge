@@ -1,5 +1,6 @@
 //! Планировщик исполнения цепочки узлов (MVP-ядро `hexforge-stream`,
-//! оркестрация живёт в src-tauri, т.к. обязана знать домен — см. docs/04 §6).
+//! живёт в hexforge-engine: ему нужен домен — реестр, кэш, история; см.
+//! docs/04 §6 про размещение).
 //!
 //! Семантики, реализуемые поверх чистого исполнения:
 //! - **Chunked streaming**: streamable-операции (`capabilities().streamable`)
@@ -24,11 +25,11 @@ use serde::Serialize;
 use std::borrow::Cow;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use tauri::Emitter;
 use uuid::Uuid;
 
 /// Событие прогресса выполнения (`op://progress`, 05-IPC-CONTRACT.md §events).
-/// Поле `bytesTotal: null` соответствует TS `number | null`.
+/// Поле `bytesTotal: null` соответствует TS `number | null`. Доставку
+/// получателю выбирает хост: GUI эмитит в WebView, CLI может печатать.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressEvent {
@@ -36,6 +37,10 @@ pub struct ProgressEvent {
     pub bytes_processed: u64,
     pub bytes_total: Option<u64>,
 }
+
+/// Получатель событий прогресса планировщика (GUI: emit в WebView,
+/// CLI: stderr/ничего). Ошибки доставки — забота реализации колбэка.
+pub type ProgressSink<'a> = &'a dyn Fn(&ProgressEvent);
 
 /// Контекст выполнения одного узла для встроенных операций: кооперативная
 /// отмена + заглушка прогресса (события на границах узлов эмитит сам
@@ -59,9 +64,9 @@ pub fn execute_chain(
     state: &AppState,
     root: &NodeId,
     token: &CancellationToken,
-    emitter: Option<&tauri::AppHandle>,
+    on_progress: ProgressSink<'_>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
-    resolve_node(root, state, token, emitter)
+    resolve_node(root, state, token, on_progress)
 }
 
 fn check_cancelled(node_id: &NodeId, token: &CancellationToken) -> HexForgeResult<()> {
@@ -78,7 +83,7 @@ fn resolve_node(
     node_id: &NodeId,
     state: &AppState,
     token: &CancellationToken,
-    emitter: Option<&tauri::AppHandle>,
+    on_progress: ProgressSink<'_>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
     check_cancelled(node_id, token)?;
 
@@ -94,14 +99,14 @@ fn resolve_node(
     let inputs: Vec<Arc<Vec<u8>>> = match node.inputs.len() {
         0 => vec![resolve_source_input(&node, node_id, state)?],
         1 => {
-            let parent_output = resolve_node(&node.inputs[0], state, token, emitter)?;
+            let parent_output = resolve_node(&node.inputs[0], state, token, on_progress)?;
             check_cancelled(node_id, token)?;
             vec![parent_output]
         }
         _ => {
             let mut resolved = Vec::with_capacity(node.inputs.len());
             for input_id in &node.inputs {
-                resolved.push(resolve_node(input_id, state, token, emitter)?);
+                resolved.push(resolve_node(input_id, state, token, on_progress)?);
                 check_cancelled(node_id, token)?;
             }
             resolved
@@ -119,7 +124,7 @@ fn resolve_node(
     );
 
     if let Some(cached) = state.cache.lock().get(&cache_key) {
-        emit_progress(emitter, node_id, cached.len());
+        emit_progress(on_progress, node_id, cached.len());
         record_snapshot(&node, state, primary_input_hash, blake3::hash(&cached));
         return Ok(cached);
     }
@@ -131,7 +136,7 @@ fn resolve_node(
     };
 
     state.cache.lock().put(cache_key, Arc::clone(&output));
-    emit_progress(emitter, node_id, output.len());
+    emit_progress(on_progress, node_id, output.len());
     record_snapshot(&node, state, primary_input_hash, blake3::hash(&output));
 
     Ok(output)
@@ -272,19 +277,16 @@ fn execute_merge_node(
     }
 }
 
-fn emit_progress(emitter: Option<&tauri::AppHandle>, node_id: &NodeId, bytes_processed: usize) {
-    // Ошибка доставки сознательно игнорируется: отсутствие слушателя/закрытое
-    // окно не должно валить выполнение узла.
-    if let Some(app) = emitter {
-        let _ = app.emit(
-            "op://progress",
-            ProgressEvent {
-                node_id: node_id.to_string(),
-                bytes_processed: bytes_processed as u64,
-                bytes_total: None,
-            },
-        );
-    }
+fn emit_progress(
+    on_progress: ProgressSink<'_>,
+    node_id: &NodeId,
+    bytes_processed: usize,
+) {
+    on_progress(&ProgressEvent {
+        node_id: node_id.to_string(),
+        bytes_processed: bytes_processed as u64,
+        bytes_total: None,
+    });
 }
 
 /// Ленивый пересчёт снапшота (FR-4.1/4.2, Time-Travel): воспроизводит его
@@ -464,6 +466,8 @@ mod tests {
     use hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES;
     use std::sync::atomic::AtomicBool;
 
+    fn no_progress(_event: &super::ProgressEvent) {}
+
     fn token() -> CancellationToken {
         Arc::new(AtomicBool::new(false))
     }
@@ -501,7 +505,7 @@ mod tests {
         let root = root_node(&state, b"Hello", "text.rot13");
         let encode = child(&state, "encoding.base64.encode", root);
 
-        let out = execute_chain(&state, &encode, &token(), None).unwrap();
+        let out = execute_chain(&state, &encode, &token(), &no_progress).unwrap();
         let expected = general_purpose::STANDARD.encode(rot13(b"Hello"));
         assert_eq!(out.as_slice(), expected.into_bytes().as_slice());
     }
@@ -514,7 +518,7 @@ mod tests {
         let state = AppState::new(hexforge_ops::build_registry());
         let root = root_node(&state, &big, "text.rot13");
 
-        let out = execute_chain(&state, &root, &token(), None).unwrap();
+        let out = execute_chain(&state, &root, &token(), &no_progress).unwrap();
         assert_eq!(out.len(), big.len());
         for (i, (orig, conv)) in big.iter().zip(out.iter()).enumerate() {
             let expected = match orig {
@@ -531,11 +535,11 @@ mod tests {
         let state = AppState::new(hexforge_ops::build_registry());
         let root = root_node(&state, b"cached", "encoding.hex.encode");
 
-        let first = execute_chain(&state, &root, &token(), None).unwrap();
+        let first = execute_chain(&state, &root, &token(), &no_progress).unwrap();
         assert_eq!(first.as_slice(), b"636163686564");
         let misses_after_first = state.cache.lock().misses;
 
-        let second = execute_chain(&state, &root, &token(), None).unwrap();
+        let second = execute_chain(&state, &root, &token(), &no_progress).unwrap();
         assert_eq!(second.as_slice(), b"636163686564");
         {
             let cache = state.cache.lock();
@@ -573,8 +577,8 @@ mod tests {
             inputs: vec![],
         });
 
-        let out_a = execute_chain(&state, &a, &token(), None).unwrap();
-        let out_b = execute_chain(&state, &b, &token(), None).unwrap();
+        let out_a = execute_chain(&state, &a, &token(), &no_progress).unwrap();
+        let out_b = execute_chain(&state, &b, &token(), &no_progress).unwrap();
         assert_eq!(out_a.as_slice(), b"Hello", "fixture must decode cleanly");
         assert_eq!(out_b.as_slice(), b"Hello");
 
@@ -592,9 +596,9 @@ mod tests {
         let r2 = root_node(&state, &[0xCD; 16], "encoding.hex.encode");
         let r3 = root_node(&state, &[0xEF; 16], "encoding.hex.encode");
 
-        execute_chain(&state, &r1, &token(), None).unwrap();
-        execute_chain(&state, &r2, &token(), None).unwrap();
-        execute_chain(&state, &r3, &token(), None).unwrap();
+        execute_chain(&state, &r1, &token(), &no_progress).unwrap();
+        execute_chain(&state, &r2, &token(), &no_progress).unwrap();
+        execute_chain(&state, &r3, &token(), &no_progress).unwrap();
         {
             let cache = state.cache.lock();
             assert_eq!(cache.misses, 3);
@@ -602,8 +606,8 @@ mod tests {
         }
 
         // r3 ещё жив → hit; r1 вытеснен → miss с пересчётом.
-        execute_chain(&state, &r3, &token(), None).unwrap();
-        execute_chain(&state, &r1, &token(), None).unwrap();
+        execute_chain(&state, &r3, &token(), &no_progress).unwrap();
+        execute_chain(&state, &r1, &token(), &no_progress).unwrap();
         let cache = state.cache.lock();
         assert_eq!(cache.hits, 1, "only r3 must remain cached");
         assert_eq!(cache.misses, 4, "evicted r1 must be recomputed");
@@ -615,7 +619,7 @@ mod tests {
         let root = root_node(&state, b"x", "text.rot13");
 
         let cancelled = Arc::new(AtomicBool::new(true));
-        let err = execute_chain(&state, &root, &cancelled, None).unwrap_err();
+        let err = execute_chain(&state, &root, &cancelled, &no_progress).unwrap_err();
 
         assert_eq!(err.kind, HexForgeErrorKind::Cancelled);
         assert!(err.message.contains("was cancelled"));
@@ -631,11 +635,11 @@ mod tests {
         let root = root_node(&state, b"hi", "text.rot13");
         let encode = child(&state, "encoding.base64.encode", root);
 
-        execute_chain(&state, &root, &token(), None).unwrap(); // корень исполняем заранее
+        execute_chain(&state, &root, &token(), &no_progress).unwrap(); // корень исполняем заранее
 
         let t = token();
         t.store(true, Ordering::Relaxed);
-        let err = execute_chain(&state, &encode, &t, None).unwrap_err();
+        let err = execute_chain(&state, &encode, &t, &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Cancelled);
     }
 
@@ -685,7 +689,7 @@ mod tests {
             inputs: vec![nc],
         });
 
-        let out = execute_chain(&state, &nb64, &token(), None).unwrap();
+        let out = execute_chain(&state, &nb64, &token(), &no_progress).unwrap();
         let expected = general_purpose::STANDARD.encode(b"Hel!");
         assert_eq!(out.as_slice(), expected.into_bytes().as_slice());
 
@@ -708,7 +712,7 @@ mod tests {
             inputs: vec![b1, b2],
         });
 
-        let err = execute_chain(&state, &bad, &token(), None).unwrap_err();
+        let err = execute_chain(&state, &bad, &token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
         assert!(err.message.contains("does not support 2 inputs"));
     }
@@ -721,7 +725,7 @@ mod tests {
         let root = root_node(&state, b"Hello", "text.rot13");
         let encode = child(&state, "encoding.base64.encode", root);
 
-        let final_out = execute_chain(&state, &encode, &token(), None).unwrap();
+        let final_out = execute_chain(&state, &encode, &token(), &no_progress).unwrap();
         let (root_snap, encode_snap) = {
             let history = state.history.read();
             let snaps = history.ordered_snapshots();
@@ -750,7 +754,7 @@ mod tests {
     fn replay_detects_mutated_source_bytes() {
         let state = AppState::new(hexforge_ops::build_registry());
         let root = root_node(&state, b"original", "text.rot13");
-        execute_chain(&state, &root, &token(), None).unwrap();
+        execute_chain(&state, &root, &token(), &no_progress).unwrap();
         let snap_id = state
             .history
             .read()

@@ -23,14 +23,16 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   ESLint без замечаний
 - ✅ Command Palette (⌘K) — первичный интерфейс, подключён к живому реестру
   операций через типизированный IPC-слой
-- ✅ `hexforge-stream` MVP: планировщик `scheduler.rs` — chunked `apply_chunk`
+- ✅ `hexforge-stream` MVP + `hexforge-engine`: chunked `apply_chunk`
   для streamable-операций, memoization (content-addressed LRU, 256MB),
   кооперативная отмена (`cancel_node` → `Cancelled`), merge-узлы через
-  `MergeTransform` + `streaming.concat`; новый крейт `hexforge-stream`
-  (чистые чанк-примитивы)
+  `MergeTransform` + `streaming.concat`; движок вынесен из GUI-шелла в
+  крейт `hexforge-engine`, чанк-примитивы — в крейт `hexforge-stream`
 - ✅ Time-Travel (FR-4): `jump_to_snapshot` — lineage-реплей из корневого
   источника с верификацией content-hash'ей и переносом головы истории;
   HistoryPanel (newest-first, клик = прыжок)
+- ✅ `hexforge-cli` (FR-7.3): `hexforge-cli run recipe.hexforge --in file
+  --out file` на том же движке без GUI; формат рецепта = GraphDto JSON
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
   источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
   (вертикальный рельс DAG с выбором узлов) → PreviewDock (TEXT/HEX ≤4KB
@@ -43,9 +45,8 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   Snapshot в Time-Travel History (blake3 content-hash'и); `list_snapshots`,
   `export_recipe`/`import_recipe` реализованы; паритет IPC-типов защищён
   golden-тестами; юнит-тесты командного слоя — зелёные
-- ⏳ Заглушки контракта: `cancel_node` (ждёт async-планировщик
-  `hexforge-stream`), `list_plugins` (ждёт `hexforge-plugin-host`),
-  export/import recipe
+- ⏳ Заглушки контракта: `list_plugins` (ждёт `hexforge-plugin-host`),
+  `import_cyberchef_recipe`
 
 ## Быстрый старт
 
@@ -58,8 +59,14 @@ npm run tauri dev    # полное нативное приложение
 
 Проверки: `npm run lint`, `npm run build`, `cargo test --workspace`.
 
+CLI-режим (FR-7.3):
+
+```bash
+cargo run -p hexforge-cli -- run recipe.hexforge --in input.bin --out output.bin
+```
+
 ## Дальше по плану MVP (см. PRD §3)
 
 Cross-node pipelining и bounded backpressure в планировщике (docs/04 §6) →
 Ветвление истории от произвольного снапшота → `hexforge-plugin-host`
-(Wasmtime sandbox) → CLI-режим (`hexforge-cli`).
+(Wasmtime sandbox).
