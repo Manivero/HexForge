@@ -84,6 +84,11 @@ interface DataSlice {
   previewHex: string | null;
   /** true, если показаны не все байты результата (лимит окна превью). */
   previewTruncated: boolean;
+  /** Постраничный HexViewer: смещение и байты текущей страницы. */
+  hexOffset: number | null;
+  hexBytes: Uint8Array | null;
+  hexLoading: boolean;
+  loadHexPage: (offset: number) => Promise<void>;
   /** Журнал истории (list_snapshots) в порядке записи; UI показывает
    * newest-first и инициирует прыжки (FR-4.1). */
   snapshots: SnapshotDto[];
@@ -263,6 +268,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewText: null,
         previewHex: null,
         previewTruncated: false,
+        hexOffset: null,
+        hexBytes: null,
       });
       get().assignSourceToRoot();
       return true;
@@ -280,6 +287,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   previewText: null,
   previewHex: null,
   previewTruncated: false,
+  hexOffset: null,
+  hexBytes: null,
+  hexLoading: false,
   snapshots: [],
   jumpingSnapshotId: null,
   runError: null,
@@ -305,6 +315,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewText: toLossyUtf8(bytes),
         previewHex: toHexDump(bytes),
         previewTruncated: pb.actualLength < res.outputSizeBytes,
+        hexOffset: null,
+        hexBytes: null,
         runningNodeId: null,
       });
       await loadSnapshots(set);
@@ -333,6 +345,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ runError: formatIpcError(err) });
     }
   },
+  loadHexPage: async (offset) => {
+    const lastRun = get().lastRun;
+    if (!lastRun) {
+      return;
+    }
+    const total = lastRun.outputSizeBytes;
+    const page = Math.max(0, Math.min(offset, Math.max(0, total - 1)));
+    set({ hexLoading: true, hexOffset: page });
+    try {
+      const pb = await ipcPreviewBytes({
+        handle: lastRun.outputHandle,
+        offset: page,
+        length: PREVIEW_LENGTH_BYTES,
+      });
+      // Рейс-гард: пока грузили страницу, смещение могло измениться.
+      if (get().hexOffset === page) {
+        set({
+          hexBytes: decodeBase64Chunk(pb.base64Chunk),
+          hexLoading: false,
+        });
+      } else {
+        set({ hexLoading: false });
+      }
+    } catch (err) {
+      set({ hexLoading: false, runError: formatIpcError(err) });
+    }
+  },
   jumpToSnapshot: async (snapshotId) => {
     set({ jumpingSnapshotId: snapshotId, runError: null });
     try {
@@ -351,6 +390,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewText: toLossyUtf8(bytes),
         previewHex: toHexDump(bytes),
         previewTruncated: pb.actualLength < res.outputSizeBytes,
+        hexOffset: null,
+        hexBytes: null,
         jumpingSnapshotId: null,
       });
       await loadSnapshots(set);

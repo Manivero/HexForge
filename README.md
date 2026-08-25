@@ -36,8 +36,9 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   --out file` на том же движке без GUI; формат рецепта = GraphDto JSON
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
   источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
-  (вертикальный рельс DAG с выбором узлов) → PreviewDock (TEXT/HEX ≤4KB
-  из `preview_bytes`, stale-бейдж при мутации графа); InspectorPanel —
+  (вертикальный рельс DAG с выбором узлов) → PreviewDock — TEXT ≤4KB и постраничный
+  HexViewer (◀▶/переход по смещению, ASCII), stale-бейдж,
+  кнопка Cancel во время запуска; InspectorPanel —
   авто-форма параметров из JSON Schema (FR-3.2); статус-бар со счётчиком
   снапшотов; без нативного бэкенда UI деградирует мягко (vite dev)
 - ✅ `src-tauri` (мост Rust↔WebView): workspace собирается целиком

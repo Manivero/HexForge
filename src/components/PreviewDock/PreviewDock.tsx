@@ -1,28 +1,54 @@
 import * as React from "react";
 import { useAppStore } from "@/store/useAppStore";
+import { buildHexRows, formatAddr } from "@/lib/bytes";
 
 type PreviewMode = "text" | "hex";
 
+const PAGE_BYTES = 4096;
+
 /**
  * PreviewDock — просмотр результата последнего запуска (вторая половина
- * потока 05-IPC-CONTRACT.md §3: run_node → preview_bytes → PreviewDock).
- * Байты приходят base64-окном ≤4KB; previewTruncated сигнализирует обрезку.
+ * потока 05-IPC-CONTRACT.md §3). TEXT — первые 4 КиБ lossy-UTF8; HEX —
+ * постраничный viewer по 4 КиБ с навигацией ◀▶ и переходом по смещению
+ * (бэкенд гарантирует лимит 1 МБ на запрос и clamp смещения).
  */
 export function PreviewDock() {
   const [mode, setMode] = React.useState<PreviewMode>("text");
   const lastRun = useAppStore((s) => s.lastRun);
   const runningNodeId = useAppStore((s) => s.runningNodeId);
   const previewText = useAppStore((s) => s.previewText);
-  const previewHex = useAppStore((s) => s.previewHex);
   const previewTruncated = useAppStore((s) => s.previewTruncated);
-  // FR-1.6 (видимая часть): граф мутировал после запуска → результат stale.
-  // Полная точечная инвалидация по downstream придёт с hexforge-stream.
   const isStale = useAppStore(
     (s) => s.lastRun !== null && s.ranAtGraphVersion !== s.graphVersion,
   );
 
-  const body =
-    mode === "text" ? (previewText ?? "") : (previewHex ?? "");
+  // Hex-пагинация: страница грузится лениво при входе в режим/смене offset.
+  const hexOffset = useAppStore((s) => s.hexOffset);
+  const hexBytes = useAppStore((s) => s.hexBytes);
+  const hexLoading = useAppStore((s) => s.hexLoading);
+  const loadHexPage = useAppStore((s) => s.loadHexPage);
+
+  React.useEffect(() => {
+    if (
+      mode === "hex" &&
+      lastRun !== null &&
+      hexBytes === null &&
+      !hexLoading
+    ) {
+      void loadHexPage(hexOffset ?? 0);
+    }
+  }, [mode, lastRun, hexBytes, hexLoading, hexOffset, loadHexPage]);
+
+  const total = lastRun?.outputSizeBytes ?? 0;
+  const offsetNow = hexOffset ?? 0;
+  const pageEnd = offsetNow + (hexBytes?.length ?? 0);
+
+  const gotoOffset = (raw: string) => {
+    const parsed = Number.parseInt(raw, 16);
+    if (!Number.isNaN(parsed)) {
+      void loadHexPage(parsed);
+    }
+  };
 
   return (
     <section className="rounded-lg border border-border-subtle bg-surface-1 p-4">
@@ -59,24 +85,91 @@ export function PreviewDock() {
           </div>
         </div>
       </header>
-      <pre
-        data-selectable
-        className={[
-          "min-h-16 max-h-48 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs",
-          "text-text-primary whitespace-pre-wrap break-all",
-        ].join(" ")}
-      >
-        {runningNodeId
-          ? "Running…"
-          : body.length > 0
-            ? body
-            : lastRun === null
-              ? "Нет результата — запустите выбранный узел."
-              : "(пустой вывод)"}
-      </pre>
-      {previewTruncated && (
+
+      {mode === "hex" && lastRun !== null && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 font-mono text-2xs text-text-muted">
+          <button
+            onClick={() => void loadHexPage(offsetNow - PAGE_BYTES)}
+            disabled={hexLoading || offsetNow === 0}
+            className="rounded-sm border border-border-default px-2 py-0.5 enabled:hover:text-text-primary disabled:opacity-40"
+          >
+            ◀ prev
+          </button>
+          <button
+            onClick={() => void loadHexPage(offsetNow + (hexBytes?.length ?? PAGE_BYTES))}
+            disabled={hexLoading || pageEnd >= total}
+            className="rounded-sm border border-border-default px-2 py-0.5 enabled:hover:text-text-primary disabled:opacity-40"
+          >
+            next ▶
+          </button>
+          <input
+            data-selectable
+            key={offsetNow}
+            defaultValue={offsetNow.toString(16)}
+            placeholder="offset(hex)"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") gotoOffset(e.currentTarget.value);
+            }}
+            onBlur={(e) => gotoOffset(e.currentTarget.value)}
+            className={[
+              "w-28 rounded-sm border border-border-default bg-surface-2 px-1.5 py-0.5",
+              "outline-none focus:border-border-focus",
+            ].join(" ")}
+          />
+          <span>
+            {formatAddr(offsetNow)}–{formatAddr(pageEnd)} / {formatAddr(total)}
+          </span>
+          {hexLoading && <span className="text-accent">loading…</span>}
+        </div>
+      )}
+
+      {mode === "hex" && lastRun !== null ? (
+        hexBytes !== null && hexBytes.length > 0 ? (
+          <div
+            data-selectable
+            className="max-h-56 min-h-16 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-2xs leading-4 text-text-primary"
+          >
+            {buildHexRows(hexBytes, offsetNow).map((row) => (
+              <div key={row.addr} className="whitespace-pre">
+                <span className="text-text-muted">
+                  {formatAddr(row.addr).slice(2)}
+                </span>
+                {"  "}
+                {row.hex}
+                {"  "}
+                <span className="text-text-secondary">{row.ascii}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <pre
+            data-selectable
+            className="min-h-16 rounded-md bg-surface-2 p-3 font-mono text-xs text-text-muted"
+          >
+            {hexLoading ? "loading…" : "(пустой вывод)"}
+          </pre>
+        )
+      ) : (
+        <pre
+          data-selectable
+          className={[
+            "max-h-48 min-h-16 overflow-auto rounded-md bg-surface-2 p-3 font-mono text-xs",
+            "text-text-primary whitespace-pre-wrap break-all",
+          ].join(" ")}
+        >
+          {runningNodeId
+            ? "Running…"
+            : previewText !== null && previewText.length > 0
+              ? previewText
+              : lastRun === null
+                ? "Нет результата — запустите выбранный узел."
+                : "(пустой вывод)"}
+        </pre>
+      )}
+
+      {mode === "text" && previewTruncated && (
         <p className="mt-1 text-2xs text-text-muted">
-          Показаны первые 4096 байт результата.
+          Показаны первые {PAGE_BYTES} байт — полный просмотр в режиме HEX.
         </p>
       )}
     </section>
