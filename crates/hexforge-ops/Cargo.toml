@@ -14,6 +14,7 @@ hex = "0.4"
 sha2 = "0.10"
 md-5 = "0.10"
 digest = "0.10"
+blake3 = "1"
 inventory = "0.3"
 
 [dev-dependencies]
