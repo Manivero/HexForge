@@ -22,12 +22,28 @@ pub struct RunSummary {
     pub executed_nodes: usize,
 }
 
+fn validate_cli_path(path: &str, field: &str) -> Result<(), String> {
+    if path.is_empty() {
+        return Err(format!("{field} path must not be empty"));
+    }
+    if path.len() > 4096 {
+        return Err(format!("{field} path exceeds maximum length (4096)"));
+    }
+    if path.contains('\0') {
+        return Err(format!("{field} path contains null byte"));
+    }
+    Ok(())
+}
+
 /// Ошибки CLI: человекочитаемая строка уходит в stderr / тестовый assert.
 pub fn run_recipe(
     recipe_path: &str,
     in_path: &str,
     out_path: &str,
 ) -> Result<RunSummary, String> {
+    validate_cli_path(recipe_path, "recipe")?;
+    validate_cli_path(in_path, "input")?;
+    validate_cli_path(out_path, "output")?;
     let started = std::time::Instant::now();
 
     // 1. Рецепт: JSON формата GraphDto (контракт 05-IPC).
@@ -119,6 +135,7 @@ pub fn run_recipe(
 /// Валидация рецепта без запуска: проверяет JSON, UUID, DAG, наличие
 /// операций в реестре и соответствие версий. Для CI-пайплайнов (FR-7.3).
 pub fn validate_recipe(recipe_path: &str) -> Result<String, String> {
+    validate_cli_path(recipe_path, "recipe")?;
     let text = std::fs::read_to_string(recipe_path)
         .map_err(|e| format!("cannot read recipe '{recipe_path}': {e}"))?;
     let dto: hexforge_engine::graph_dto::GraphDto = serde_json::from_str(&text)

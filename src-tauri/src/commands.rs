@@ -89,6 +89,7 @@ pub fn open_file(
     req: OpenFileRequest,
     state: State<Arc<AppState>>,
 ) -> HexForgeResult<OpenFileResponse> {
+    validate_fs_path(&req.path, "path")?;
     let file = std::fs::File::open(&req.path).map_err(|e| {
         HexForgeError::invalid_input(format!("cannot open '{}': {e}", req.path))
     })?;
@@ -244,6 +245,19 @@ fn parse_handle(raw: &str) -> HexForgeResult<Uuid> {
     Uuid::parse_str(raw).map_err(|_| HexForgeError::invalid_input(format!("'{raw}' is not a valid source handle")))
 }
 
+fn validate_fs_path(path: &str, field: &str) -> HexForgeResult<()> {
+    if path.is_empty() {
+        return Err(HexForgeError::invalid_parameter(field, "path must not be empty"));
+    }
+    if path.len() > 4096 {
+        return Err(HexForgeError::invalid_parameter(field, "path exceeds maximum length (4096)"));
+    }
+    if path.contains('\0') {
+        return Err(HexForgeError::invalid_parameter(field, "path contains null byte"));
+    }
+    Ok(())
+}
+
 // ---------- Patch source (FR Hex Editor) ----------
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -362,12 +376,9 @@ pub async fn set_graph(
 #[serde(rename_all = "camelCase")]
 pub struct RunNodeRequest {
     pub node_id: String,
-    /// FR-1.6 (`previewOnly=true`: downstream не пересчитывается). MVP-исполнитель
-    /// и так никогда не трогает downstream — выполняется только запрошенный узел
-    /// и его входная цепочка, — поэтому различение режимов появится вместе с
-    /// планировщиком `hexforge-stream`; поле принимается ради совместимости
-    /// контракта (`05-IPC-CONTRACT.md`).
-    #[allow(dead_code)]
+    /// FR-1.6: `previewOnly=true` — пересчитывается только запрошенный узел и его
+    /// входная цепочка; `false` — дополнительно прогреваются (кэшируются)
+    /// downstream-узлы для мгновенного превью при переключении (контракт 05 §3).
     pub preview_only: bool,
 }
 
@@ -411,15 +422,44 @@ pub async fn run_node(
     // результат и репортит прогресс через op://progress.
     let task_token = Arc::clone(&token);
     let task_state = Arc::clone(&exec_state);
+    let app_for_progress = app.clone();
     let output = tauri::async_runtime::spawn_blocking(move || {
         // Прогресс уходит в WebView; ошибка доставки сознательно игнорируется.
         let on_progress = |event: &hexforge_engine::scheduler::ProgressEvent| {
-            let _ = app.emit("op://progress", event);
+            let _ = app_for_progress.emit("op://progress", event);
         };
         scheduler::execute_chain(&task_state, &node_id, &task_token, &on_progress)
     })
     .await
     .map_err(|e| HexForgeError::internal(format!("node execution worker failed: {e}")))??;
+
+    // FR-1.6: preview_only=false — прогреваем downstream кэш (мгновенное превью
+    // при переключении узлов). Ошибки прогрева игнорируются — главный результат
+    // уже получен; отмена проверяется между узлами.
+    if !req.preview_only {
+        let downstream: Vec<Uuid> = {
+            let g = exec_state.graph.read().clone();
+            g.downstream_of(node_id)
+                .into_iter()
+                .filter(|id| *id != node_id)
+                .collect()
+        };
+        for down_id in downstream {
+            if token.load(Ordering::Relaxed) {
+                break;
+            }
+            let t_state = Arc::clone(&exec_state);
+            let t_token = Arc::clone(&token);
+            let app_clone = app.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                let on_progress = |event: &hexforge_engine::scheduler::ProgressEvent| {
+                    let _ = app_clone.emit("op://progress", event);
+                };
+                let _ = scheduler::execute_chain(&t_state, &down_id, &t_token, &on_progress);
+            })
+            .await;
+        }
+    }
 
     // Гарантированный cleanup реестра отмен (успех или ошибка — токен снят).
     // Если cancel_node уже изъял токен (one-shot), take вернёт None — это норм.
@@ -546,6 +586,7 @@ pub fn export_recipe(
 }
 
 fn export_recipe_inner(state: &AppState, req: ExportRecipeRequest) -> HexForgeResult<()> {
+    validate_fs_path(&req.target_path, "targetPath")?;
     let graph: Graph = req.graph.clone().try_into()?;
     graph.topo_order().map_err(HexForgeError::from)?;
 
@@ -589,6 +630,7 @@ pub fn import_recipe(
 }
 
 fn import_recipe_inner(state: &AppState, req: ImportRecipeRequest) -> HexForgeResult<ImportRecipeResponse> {
+    validate_fs_path(&req.source_path, "sourcePath")?;
     let text = std::fs::read_to_string(&req.source_path).map_err(|e| {
         HexForgeError::invalid_input(format!("cannot read '{}': {e}", req.source_path))
     })?;

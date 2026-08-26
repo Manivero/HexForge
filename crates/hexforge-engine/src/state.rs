@@ -108,11 +108,12 @@ pub enum WriteRegionError {
 /// Content-addressed LRU-кэш выходов узлов планировщика (см. scheduler.rs).
 /// Ключ — `reproducibility_key(op@ver :: input_hash :: params)`: инвалидация
 /// не требуется по построению, вытеснение — только по бюджету байтов.
+/// Реализует истинный LRU: hit перемещает ключ в конец очереди, вытесняются
+/// давно неиспользуемые записи, а не просто старые по вставке.
 pub struct OutputCache {
     entries: HashMap<String, CacheEntry>,
-    /// Порядок доступа для вытеснения старейших: ключи в порядке вставки,
-    /// при hit-переиспользовании порядок не обновляется (детерминизм важнее
-    /// точного LRU; бюджет и так ограничивает worst-case память).
+    /// Порядок LRU: фронт — давно неиспользуемые, бэк — недавно использованные.
+    /// При hit ключ перемещается в конец; при вытеснении pop_front.
     order: VecDeque<String>,
     used_bytes: usize,
     max_bytes: usize,
@@ -147,7 +148,7 @@ impl OutputCache {
         self.used_bytes = 0;
     }
 
-        pub fn entries_len(&self) -> usize {
+    pub fn entries_len(&self) -> usize {
         self.entries.len()
     }
 
@@ -155,7 +156,13 @@ impl OutputCache {
         match self.entries.get(key) {
             Some(entry) => {
                 self.hits += 1;
-                Some(Arc::clone(&entry.output))
+                let cloned = Arc::clone(&entry.output);
+                // LRU: переместить ключ в конец очереди
+                if let Some(pos) = self.order.iter().position(|k| k == key) {
+                    self.order.remove(pos);
+                    self.order.push_back(key.to_string());
+                }
+                Some(cloned)
             }
             None => {
                 self.misses += 1;
@@ -164,12 +171,33 @@ impl OutputCache {
         }
     }
 
-    /// Вставляет выход; при превышении бюджета вытесняет старейшие записи,
-    /// включая (при необходимости) саму новую — результат больше кэша полезен
-    /// текущему вызову, но кэшировать его бессмысленно.
+    /// Вставляет выход; при превышении бюджета вытесняет наименее используемые
+    /// записи (фронт LRU-очереди). Результат больше бюджета не кэшируется.
     pub fn put(&mut self, key: String, output: Arc<Vec<u8>>) {
         let size = output.len();
         if size > self.max_bytes {
+            return;
+        }
+        // Если ключ уже есть — обновляем запись и перемещаем в конец LRU
+        if let Some(existing) = self.entries.get(&key) {
+            let old_size = existing.output.len();
+            // Освобождаем место с учётом перезаписи (не вытесняем сам обновляемый ключ)
+            while self.used_bytes - old_size + size > self.max_bytes {
+                let Some(oldest) = self.order.front().cloned() else { break; };
+                if oldest == key {
+                    break;
+                }
+                self.order.pop_front();
+                if let Some(evicted) = self.entries.remove(&oldest) {
+                    self.used_bytes = self.used_bytes.saturating_sub(evicted.output.len());
+                }
+            }
+            if let Some(pos) = self.order.iter().position(|k| k == &key) {
+                self.order.remove(pos);
+            }
+            self.used_bytes = self.used_bytes.saturating_sub(old_size) + size;
+            self.entries.insert(key.clone(), CacheEntry { output });
+            self.order.push_back(key);
             return;
         }
         while self.used_bytes + size > self.max_bytes {
@@ -180,10 +208,9 @@ impl OutputCache {
                 self.used_bytes = self.used_bytes.saturating_sub(evicted.output.len());
             }
         }
-        if self.entries.insert(key.clone(), CacheEntry { output }).is_none() {
-            self.used_bytes += size;
-            self.order.push_back(key);
-        }
+        self.entries.insert(key.clone(), CacheEntry { output });
+        self.used_bytes += size;
+        self.order.push_back(key);
     }
 }
 
@@ -292,19 +319,52 @@ mod tests {
         assert_eq!(hit.len(), 60);
         assert_eq!(cache.hits, 1);
 
-        // Вставка 50 байт при бюджете 100 вытесняет САМЫЙ СТАРЫЙ k1 (60):
-        // 90+50 > 100 → evict k1 → used = 30(k2)+50(k3) = 80 <= 100.
-        cache.put("k3".into(), Arc::new(vec![0; 50]));
+        // LRU: после hit k1 порядок [k2, k1]; вставка k3 (20 байт) вытеснит k2 (давно неиспользуемый),
+        // а k1 (недавно использованный) останется — 90+20 >100 → evict k2 → used 80.
+        cache.put("k3".into(), Arc::new(vec![0; 20]));
         assert!(
-            cache.get("k1").is_none(),
-            "oldest-inserted entry must be evicted first"
+            cache.get("k2").is_none(),
+            "LRU: давно неиспользуемый k2 должен быть вытеснен первым"
         );
-        assert!(cache.get("k2").is_some());
+        assert!(cache.get("k1").is_some(), "недавно использованный k1 должен остаться");
         assert!(cache.get("k3").is_some());
 
         // Результат больше бюджета не кэшируется вовсе.
         cache.put("huge".into(), Arc::new(vec![0; 500]));
         assert!(cache.get("huge").is_none());
+    }
+
+    #[test]
+    fn output_cache_lru_updates_on_hit() {
+        // Более прямой тест LRU: k1,k2,k3 вставить, затем хитнуть k1, затем k4 вытесняет k2
+        let mut cache = OutputCache::new(90);
+        cache.put("k1".into(), Arc::new(vec![0; 30]));
+        cache.put("k2".into(), Arc::new(vec![0; 30]));
+        cache.put("k3".into(), Arc::new(vec![0; 30]));
+        // order [k1,k2,k3]
+        cache.get("k1");
+        // order теперь [k2,k3,k1]
+        cache.put("k4".into(), Arc::new(vec![0; 30]));
+        // нужно вытеснить 30 байт → evict k2
+        assert!(cache.get("k2").is_none(), "k2 — давно неиспользуемый, должен вытесниться");
+        assert!(cache.get("k1").is_some());
+        assert!(cache.get("k3").is_some());
+        assert!(cache.get("k4").is_some());
+    }
+
+    #[test]
+    fn output_cache_put_duplicate_updates_lru_and_bytes() {
+        let mut cache = OutputCache::new(100);
+        cache.put("k1".into(), Arc::new(vec![0; 40]));
+        cache.put("k2".into(), Arc::new(vec![0; 40]));
+        // Перезаписать k1 большим значением 50 байт — used должен пересчитаться
+        cache.put("k1".into(), Arc::new(vec![1; 50]));
+        assert_eq!(cache.used_bytes, 90);
+        assert_eq!(cache.entries_len(), 2);
+        // k1 теперь MRU, order [k2, k1]; вставка 20 байт вытеснит k2
+        cache.put("k3".into(), Arc::new(vec![0; 20]));
+        assert!(cache.get("k2").is_none());
+        assert!(cache.get("k1").is_some());
     }
 
     #[test]
