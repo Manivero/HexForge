@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useAppStore } from "@/store/useAppStore";
-import type { OperationNodeDto } from "@/lib/ipc-contract";
+import { layoutOrder } from "@/lib/graphWalk";
 
 /**
  * GraphCanvas — первый визуальный срез DAG (роадмап MVP):
@@ -8,40 +8,6 @@ import type { OperationNodeDto } from "@/lib/ipc-contract";
  * merge-раскладка появится вместе с hexforge-stream; раскладка — чистая
  * функция от nodes, её легко заменить полноценным layout без смены API.
  */
-
-/** Порядок отрисовки: корни → BFS по детям; сироты — в конце. */
-function layoutOrder(nodes: Record<string, OperationNodeDto>): string[] {
-  const children = new Map<string, string[]>();
-  const roots: string[] = [];
-  for (const node of Object.values(nodes)) {
-    if (node.inputs.length === 0) {
-      roots.push(node.id);
-    }
-    for (const input of node.inputs) {
-      const list = children.get(input);
-      if (list) {
-        list.push(node.id);
-      } else {
-        children.set(input, [node.id]);
-      }
-    }
-  }
-
-  const order: string[] = [];
-  const seen = new Set<string>();
-  const queue = [...roots];
-  while (queue.length > 0) {
-    const id = queue.shift();
-    if (id === undefined || seen.has(id)) continue;
-    seen.add(id);
-    order.push(id);
-    queue.push(...(children.get(id) ?? []));
-  }
-  for (const id of Object.keys(nodes)) {
-    if (!seen.has(id)) order.push(id);
-  }
-  return order;
-}
 
 const ID_SLICE = 8;
 
@@ -69,7 +35,7 @@ export function GraphCanvas() {
         />
       )}
       <ol className="flex flex-col gap-1.5">
-        {order.map((id) => {
+        {order.map(({ id }) => {
           const node = nodes[id];
           if (!node) return null;
           const isSelected = id === selectedNodeId;

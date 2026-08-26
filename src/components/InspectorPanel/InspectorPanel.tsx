@@ -1,4 +1,5 @@
 import * as React from "react";
+import { asParamsObject, extractFields, type SchemaField } from "@/lib/schemaForm";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
@@ -9,55 +10,6 @@ import { useAppStore } from "@/store/useAppStore";
  * поля схемы не рендерятся (не молча теряются — схема принадлежит
  * Rust-стороне и расширяется вместе с формой).
  */
-
-interface SchemaField {
-  name: string;
-  type: "string" | "boolean" | "integer" | "number" | "other";
-  enumValues: string[];
-  hasDefault: boolean;
-  defaultValue: unknown;
-}
-
-function extractFields(schema: unknown): SchemaField[] {
-  if (schema === null || typeof schema !== "object") return [];
-  const obj = schema as Record<string, unknown>;
-  const props = obj.properties;
-  if (props === null || typeof props !== "object" || Array.isArray(props)) {
-    return [];
-  }
-  const fields: SchemaField[] = [];
-  for (const [name, rawDef] of Object.entries(props)) {
-    if (rawDef === null || typeof rawDef !== "object" || Array.isArray(rawDef)) {
-      continue;
-    }
-    const def = rawDef as Record<string, unknown>;
-    const type =
-      def.type === "string" ||
-      def.type === "boolean" ||
-      def.type === "integer" ||
-      def.type === "number"
-        ? def.type
-        : "other";
-    fields.push({
-      name,
-      type,
-      enumValues: Array.isArray(def.enum)
-        ? def.enum.filter((v): v is string => typeof v === "string")
-        : [],
-      hasDefault: "default" in def,
-      defaultValue: def.default,
-    });
-  }
-  return fields;
-}
-
-function asParamsObject(params: unknown): Record<string, unknown> {
-  return params !== null &&
-    typeof params === "object" &&
-    !Array.isArray(params)
-    ? (params as Record<string, unknown>)
-    : {};
-}
 
 export function InspectorPanel() {
   const node = useAppStore((s) =>

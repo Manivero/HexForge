@@ -33,3 +33,54 @@ export function findRootId(
   }
   return cursor ? cursor.id : null;
 }
+
+export interface LayoutNode {
+  id: string;
+  depth: number;
+}
+
+/**
+ * Порядок отрисовки канваса: BFS от корней по детям, «сироты» (недостижимые
+ * от корней) — в конце. Чистая функция: замена на полноценный layout не меняет
+ * API потребителя.
+ */
+export function layoutOrder(
+  nodes: Record<string, OperationNodeDto>,
+): LayoutNode[] {
+  const children = new Map<string, string[]>();
+  const roots: string[] = [];
+  for (const node of Object.values(nodes)) {
+    if (node.inputs.length === 0) roots.push(node.id);
+    for (const input of node.inputs) {
+      const list = children.get(input);
+      if (list) list.push(node.id);
+      else children.set(input, [node.id]);
+    }
+  }
+
+  const out: LayoutNode[] = [];
+  const seen = new Set<string>();
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const id = queue.shift();
+    if (id === undefined || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, depth: depthOf(id, nodes) });
+    queue.push(...(children.get(id) ?? []));
+  }
+  // Сироты — недостижимые узлы (повреждённое состояние), рисуем последними.
+  for (const id of Object.keys(nodes)) {
+    if (!seen.has(id)) out.push({ id, depth: 0 });
+  }
+  return out;
+}
+
+function depthOf(id: string, nodes: Record<string, OperationNodeDto>): number {
+  let d = 0;
+  let cur: OperationNodeDto | undefined = nodes[id];
+  while (cur && cur.inputs.length > 0) {
+    d += 1;
+    cur = nodes[cur.inputs[0] ?? ""];
+  }
+  return d;
+}

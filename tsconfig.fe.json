@@ -12,6 +12,7 @@
     "src/lib/bytes.ts",
     "src/lib/fuzzyMatch.ts",
     "src/lib/graphWalk.ts",
-    "src/lib/graphMutate.ts"
+    "src/lib/graphMutate.ts",
+    "src/lib/schemaForm.ts"
   ]
 }
