@@ -1333,7 +1333,7 @@ mod tests {
                         "op finished without observing cancellation".into(),
                     ));
                 }
-                if iters % 1024 == 0 {
+                if iters.is_multiple_of(1024) {
                     std::thread::yield_now();
                 }
                 let _ = std::hint::black_box(iters);
@@ -1363,7 +1363,7 @@ mod tests {
                     panic!("cancel-aware op never started");
                 }
                 std::hint::spin_loop();
-                if spins % 4096 == 0 {
+                if spins.is_multiple_of(4096) {
                     std::thread::yield_now();
                 }
             }
@@ -1462,7 +1462,7 @@ mod tests {
                     panic!("stream op never started");
                 }
                 std::hint::spin_loop();
-                if spins % 4096 == 0 {
+                if spins.is_multiple_of(4096) {
                     std::thread::yield_now();
                 }
             }

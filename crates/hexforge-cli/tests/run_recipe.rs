@@ -4,7 +4,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use hexforge_core::graph::NodeId;
 use serde_json::json;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn temp_dir() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("hf-cli-{}", uuid::Uuid::new_v4()));
@@ -12,11 +12,11 @@ fn temp_dir() -> PathBuf {
     dir
 }
 
-fn fs_extra_mkdir(dir: &PathBuf) {
+fn fs_extra_mkdir(dir: &Path) {
     std::fs::create_dir_all(dir).expect("create temp dir");
 }
 
-fn write(dir: &PathBuf, name: &str, contents: &[u8]) -> PathBuf {
+fn write(dir: &Path, name: &str, contents: &[u8]) -> PathBuf {
     let p = dir.join(name);
     std::fs::write(&p, contents).expect("write fixture");
     p

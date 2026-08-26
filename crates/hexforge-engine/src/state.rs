@@ -87,11 +87,12 @@ impl SourceStore {
     /// replay-реплея); false — handle неизвестен.
     #[cfg(test)]
     pub fn replace(&mut self, handle: Uuid, entry: SourceEntry) -> bool {
-        if self.entries.contains_key(&handle) {
-            self.entries.insert(handle, entry);
-            true
-        } else {
-            false
+        match self.entries.get_mut(&handle) {
+            Some(slot) => {
+                *slot = entry;
+                true
+            }
+            None => false,
         }
     }
 }
