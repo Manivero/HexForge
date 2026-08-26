@@ -6,8 +6,10 @@
 //! ("ядро ничего не знает о конкретных операциях") и требования расти
 //! до 400+ операций без узкого места в одном файле.
 
+pub mod crypto;
 pub mod encoding;
 pub mod hashing;
+pub mod network;
 pub mod streaming;
 pub mod text;
 
