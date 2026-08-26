@@ -6,6 +6,7 @@
 //! ("ядро ничего не знает о конкретных операциях") и требования расти
 //! до 400+ операций без узкого места в одном файле.
 
+pub mod compression;
 pub mod crypto;
 pub mod binary;
 pub mod encoding;

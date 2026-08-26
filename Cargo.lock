@@ -1328,6 +1328,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "digest",
+ "flate2",
  "hex",
  "hexforge-core",
  "inventory",
