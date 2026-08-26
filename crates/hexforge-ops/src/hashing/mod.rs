@@ -1,3 +1,4 @@
+pub mod crc32;
 use digest::Digest;
 use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
 use md5::Md5;

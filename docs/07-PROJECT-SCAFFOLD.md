@@ -56,6 +56,7 @@ hexforge/
 | Tauri command `greet` + полный IPC-слой (11 команд) | ✅ | `cargo build --workspace` проходит; иконки сгенерированы через `npx tauri icon` в `src-tauri/icons/` |
 | Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
 | Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 22 unit-теста командного слоя/состояния зелёные |
+| Операции PRD §3.3 (дополнение): encoding.base32 (RFC 4648), hashing.crc32 (IEEE), text.html_encode/html_decode (named+numeric entities) | ✅ | RFC-векторы; CRC32 эталон 123456789→cbf43926; roundtrip UTF-8; unknown entity passthrough |
 | Операции PRD §3.3: crypto.xor (UTF-8 ключ циклом), network.url_encode/url_decode (RFC 3986), streaming.concat | ✅ | inventory-регистрация без правок ядра; юнит-тесты на каждый (векторы, involution, roundtrip, ошибки ключа/hex) |
 | Граф: удаление узла с мостом детей к родителю + Clear Graph | ✅ | lib/graphMutate removeNode — чистые мутации + FE-тесты; set_graph синхронизирует |
 | PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset, ASCII) + патч региона (hex-пары ≤ страницы) | ✅ | preview_bytes + patch_source (перезапись InMemory в границах, Mapped read-only); golden ×2 |
@@ -104,8 +105,8 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 97/97 зелёных (Rust) + 40 FE-юнитов (fuzzyMatch ⌘K, hex-viewer formatting, graphWalk, graphMutate, schemaForm FR-3.2)
-(core 9, ops 29, stream 7, engine 31, tauri 22, cli 4 — включая IPC-parity golden-тесты,
+Все изменения перепроверены: `cargo test --workspace` — 118/118 зелёных (Rust) + 29 FE-юнитов (fuzzyMatch ⌘K, hex-viewer formatting, graphWalk, graphMutate, schemaForm FR-3.2)
+(core 9, ops 38, stream 7, engine 31, tauri 22, cli 4 — включая IPC-parity golden-тесты,
 планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
 `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка,
 `npm run test:fe` — 14/14 (fuzzyMatch ⌘K + hex-viewer formatting).

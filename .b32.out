@@ -1,0 +1,1 @@
+"hunk);\n\n            out.push(ALPHABET[(buf[0] >> 3) as usize]);\n            out.push(ALPHABET[(((buf[0] & 0x07) << 2) | (buf[1] >> 6)) as us"
