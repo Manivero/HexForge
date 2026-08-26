@@ -10,6 +10,7 @@
   },
   "include": [
     "src/lib/bytes.ts",
-    "src/lib/fuzzyMatch.ts"
+    "src/lib/fuzzyMatch.ts",
+    "src/lib/graphWalk.ts"
   ]
 }

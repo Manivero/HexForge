@@ -29,6 +29,7 @@ import type {
   SourceHandle,
 } from "@/lib/ipc-contract";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
+import { findRootId } from "@/lib/graphWalk";
 
 export type Theme = "dark" | "light";
 
@@ -234,17 +235,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!sourceHandle || !selectedNodeId) {
       return false;
     }
-    // Поднимаемся по входной цепочке до корня (граф ацикличен — инвариант
-    // ядра), привязываем источник ему.
-    let cursor: OperationNodeDto | undefined = nodes[selectedNodeId];
-    while (cursor && cursor.inputs.length > 0) {
-      const nextId: string | undefined = cursor.inputs[0];
-      cursor = nextId !== undefined ? nodes[nextId] : undefined;
-    }
-    if (!cursor || cursor.inputs.length !== 0) {
+    // Поднимаемся по входной цепочке до корня — чистая функция в
+    // lib/graphWalk (циклозащищённая, покрыта юнит-тестами).
+    const rootId = findRootId(nodes, selectedNodeId);
+    if (rootId === null) {
       return false;
     }
-    const rootId = cursor.id;
     const root = nodes[rootId];
     if (!root) {
       return false;
