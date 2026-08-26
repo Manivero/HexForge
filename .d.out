@@ -1,3 +1,0 @@
-COUNT: "сть на `digest`.\n\nВсе изменения перепроверены: `cargo test --workspace` — 84/84 зелёных (Rust) + 19 FE-юнитов (fuzzyMatch ⌘K, hex-viewer formatting, graphWalk)\n(core 9, ops 16, stream 7, engine 29, tauri 22, cli 4 — включая IPC-parity golden-тесты,\nпланировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),\n`tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vit"
-
-DOCK: "e — чистые мутации + FE-тесты; set_graph синхронизирует |\n| PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset"

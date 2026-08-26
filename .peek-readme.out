@@ -1,1 +1,0 @@
-"ump_to_snapshot` — lineage-реплей из корневого\n  источника с верификацией content-hash'ей и переносом головы истории;\n  HistoryPanel — дерево по parent-ссылкам с маркерами ветвления,\n  клик = прыжок; кнопка Cancel активирует кооперативную отмену из UI\n- ✅ `hexforge-cli` (FR-7.3): `hexforge-cli run recipe.hexforge --in "

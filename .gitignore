@@ -32,3 +32,6 @@ Thumbs.db
 
 # Temporary files
 *.tmp
+*.out
+.fe-build/
+.opencode/

@@ -57,6 +57,13 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `reverse` | Byte-level reversal |
 | `rot13` | ROT13 substitution |
 
+### Compression
+| Operation | Description |
+|-----------|-------------|
+| `gzip.compress` / `gzip.decompress` | Gzip (RFC 1952) via flate2 |
+| `zlib.compress` / `zlib.decompress` | Zlib (RFC 1950) via flate2 |
+| `deflate.compress` / `deflate.decompress` | Raw Deflate (RFC 1951) via flate2 |
+
 ### Streaming
 | Operation | Description |
 |-----------|-------------|
@@ -151,7 +158,7 @@ npm run build       # tsc --noEmit + vite build
 
 | Priority | Item |
 |----------|------|
-| Next | Compression ops (gzip/zlib via flate2) |
+| Next | Bzip2 / LZMA compression (PRD §3.3) |
 | Next | Parallel pipeline tuning (64 MB chunks per FR-5.2) |
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
 | Near | Import CyberChef recipes |
@@ -190,11 +197,11 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 
 ## Known Limitations
 
-- **Compression not yet implemented** — gzip/zlib/bzip2/lzma operations pending
+- **Bzip2/LZMA not yet implemented** — gzip/zlib/deflate done via flate2; bzip2/lzma pending
 - **Plugin system not implemented** — Wasmtime host is designed but not built
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
 - **previewOnly flag ignored** — downstream recalculation never happens (single-node execution only)
-- **No multi-source graphs** — recipes assume exactly one root source node
-- **Cross-node pipelining incomplete** — sequential stage execution within fused runs; no concurrent chunk flow
+- **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
+- **Parallel streaming pipeline** — fusion + bounded channels (4×1MiB) implemented; 64 MB FR-5.2 tuning pending
 - **64 MB chunks not implemented** — default chunk size is 1 MiB (FR-5.2 target not met)
 - **No i18n** — architecture ready but en/ru translations not extracted
