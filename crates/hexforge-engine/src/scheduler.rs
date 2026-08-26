@@ -698,6 +698,33 @@ pub fn compute_invalidated(
     stale.into_iter().collect()
 }
 
+/// Stale-набор при мутации ИСТОЧНИКА (patch_source): корни, чей
+/// params.sourceHandle совпадает с патчнутым handle, плюс всё их downstream.
+/// Граф не меняется — меняются байты за хэндлом, поэтому все прогонные
+/// результаты, выведенные из этого источника, устарели (FR-1.6).
+pub fn compute_invalidated_for_source(
+    graph: &hexforge_core::Graph,
+    source_handle: &str,
+) -> Vec<String> {
+    let mut stale: std::collections::BTreeSet<String> = Default::default();
+    for (id, node) in graph.nodes.iter() {
+        let is_consumer_of_handle = node.inputs.is_empty()
+            && node
+                .params
+                .get("sourceHandle")
+                .and_then(|v| v.as_str())
+                .map(|h| h == source_handle)
+                .unwrap_or(false);
+        if !is_consumer_of_handle {
+            continue;
+        }
+        for down in graph.downstream_of(*id) {
+            stale.insert(down.to_string());
+        }
+    }
+    stale.into_iter().collect()
+}
+
 fn emit_progress(
     on_progress: ProgressSink<'_>,
     node_id: &NodeId,
@@ -1543,6 +1570,35 @@ mod tests {
         ]);
         let stale = compute_invalidated(&old, &new);
         assert_eq!(stale, vec![b.to_string()]);
+    }
+
+    #[test]
+    fn invalidated_for_source_covers_only_its_downstream() {
+        // Два независимых источника h1 и h2; патч h1 затрагивает цепочку A,
+        // но не цепочку B.
+        use serde_json::json;
+
+        let (a1, a2, b1, b2) = (
+            NodeId::new_v4(),
+            NodeId::new_v4(),
+            NodeId::new_v4(),
+            NodeId::new_v4(),
+        );
+        let g = hexforge_core::Graph::from_nodes(vec![
+            mk_node(a1, "text.rot13", json!({ "sourceHandle": "h1" }), vec![]),
+            mk_node(a2, "encoding.hex.encode", json!({}), vec![a1]),
+            mk_node(b1, "text.rot13", json!({ "sourceHandle": "h2" }), vec![]),
+            mk_node(b2, "encoding.hex.encode", json!({}), vec![b1]),
+        ]);
+
+        let stale = compute_invalidated_for_source(&g, "h1");
+        assert_eq!(stale.len(), 2);
+        assert!(stale.contains(&a1.to_string()));
+        assert!(stale.contains(&a2.to_string()));
+        assert!(!stale.contains(&b1.to_string()));
+
+        // Патч неизвестного handle — пустой набор.
+        assert!(compute_invalidated_for_source(&g, "nope").is_empty());
     }
 
     #[test]

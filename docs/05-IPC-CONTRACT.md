@@ -138,7 +138,9 @@ export interface PatchSourceResponse {
   newSizeBytes: number;
 }
 /** invoke<PatchSourceResponse>("patch_source", req) — точечная перезапись
- *  InMemory-источника (FR Hex Editor MVP): без роста, Mapped — read-only. */
+ *  InMemory-источника (FR Hex Editor MVP): без роста, Mapped — read-only.
+ *  Побочный эффект: очистка output-кэша планировщика и emit
+ *  graph://invalidated для downstream патчнутого источника (FR-1.6). */
 
 // ---------- Commands: граф ----------
 

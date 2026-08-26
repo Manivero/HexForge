@@ -269,9 +269,10 @@ pub struct PatchSourceResponse {
 /// хэши будущих прогонов естественным образом, старые снапшоты остаются
 /// корректными записями прошлого (FR-4.2).
 #[tauri::command]
-pub fn patch_source(
+pub async fn patch_source(
     req: PatchSourceRequest,
-    state: State<Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
+    app: tauri::AppHandle,
 ) -> HexForgeResult<PatchSourceResponse> {
     let handle = parse_handle(&req.handle)?;
     let data = general_purpose::STANDARD
@@ -297,6 +298,21 @@ pub fn patch_source(
             "source is a memory-mapped file and cannot be patched (read-only MVP)",
         ),
     })?;
+
+    // Консервативная инвалидация кэша (см. OutputCache::clear): патч меняет
+    // байты за хэндлом — прежние content-hash ключи больше не соответствуют.
+    state.cache.lock().clear();
+
+    // FR-1.6: потребители патчнутого источника устарели — уведомляем UI.
+    let stale =
+        hexforge_engine::scheduler::compute_invalidated_for_source(&state.graph.read(), &req.handle);
+    if !stale.is_empty() {
+        use tauri::Emitter;
+        let _ = app.emit(
+            "graph://invalidated",
+            hexforge_engine::scheduler::GraphInvalidatedEvent { stale_node_ids: stale },
+        );
+    }
 
     Ok(PatchSourceResponse {
         new_size_bytes: new_size as u64,

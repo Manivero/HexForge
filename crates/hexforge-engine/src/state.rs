@@ -136,7 +136,17 @@ impl OutputCache {
     }
 
     /// Число живых записей (диагностика/тесты).
-    pub fn entries_len(&self) -> usize {
+    /// Полная очистка кэша: вызывается при мутации источника (patch_source) —
+    /// content-addressed ключи не позволяют точечно найти зависимые записи
+    /// (хэш входа меняется), консервативная инвалидация гарантирует, что
+    /// кэш никогда не вернёт байты, не соответствующие текущему источнику.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
+        self.used_bytes = 0;
+    }
+
+        pub fn entries_len(&self) -> usize {
         self.entries.len()
     }
 
@@ -333,6 +343,17 @@ mod tests {
             WriteRegionError::ReadOnlyMapped,
             WriteRegionError::UnknownHandle
         );
+    }
+
+    #[test]
+    fn output_cache_clear_invalidates_everything() {
+        let mut cache = OutputCache::new(100);
+        cache.put("k".into(), Arc::new(vec![0; 10]));
+        assert!(cache.get("k").is_some());
+
+        cache.clear();
+        assert!(cache.get("k").is_none(), "после clear старых hit'ов нет");
+        assert_eq!(cache.entries_len(), 0);
     }
 
     #[test]
