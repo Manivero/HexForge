@@ -12,6 +12,7 @@ import {
   createLiteralSource,
   runNode as ipcRunNode,
   previewBytes as ipcPreviewBytes,
+  patchSource as ipcPatchSource,
   listSnapshots as ipcListSnapshots,
   jumpToSnapshot as ipcJumpToSnapshot,
   cancelNode as ipcCancelNode,
@@ -89,6 +90,10 @@ interface DataSlice {
   hexBytes: Uint8Array | null;
   hexLoading: boolean;
   loadHexPage: (offset: number) => Promise<void>;
+  /** Патч одного байта в просматриваемом буфере (FR Hex Editor MVP):
+   * перезапись в границах, затем перезагрузка страницы и инвалидация
+   * результата запуска (исходные байты изменились). */
+  patchViewedByte: (offset: number, valueHex: string) => Promise<boolean>;
   /** Журнал истории (list_snapshots) в порядке записи; UI показывает
    * newest-first и инициирует прыжки (FR-4.1). */
   snapshots: SnapshotDto[];
@@ -379,6 +384,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
   applyServerStale: (ids) => set({ staleNodeIds: ids }),
+  patchViewedByte: async (offset, valueHex) => {
+    const lastRun = get().lastRun;
+    if (!lastRun || !/^[0-9a-fA-F]{2}$/.test(valueHex)) {
+      return false;
+    }
+    const byte = Number.parseInt(valueHex, 16);
+    try {
+      await ipcPatchSource({
+        handle: lastRun.outputHandle,
+        offset,
+        bytesBase64: btoa(String.fromCharCode(byte)),
+      });
+      // Буфер изменился → прошлый результат запуска больше не отражает его;
+      // страница hex перезагружается, TEXT-превью сбрасывается.
+      set({
+        lastRun: null,
+        ranAtGraphVersion: null,
+        previewText: null,
+        previewHex: null,
+        previewTruncated: false,
+        hexBytes: null,
+      });
+      await get().loadHexPage(offset);
+      return true;
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
+      return false;
+    }
+  },
   jumpToSnapshot: async (snapshotId) => {
     set({ jumpingSnapshotId: snapshotId, runError: null });
     try {

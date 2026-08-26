@@ -14,6 +14,8 @@ const PAGE_BYTES = 4096;
  */
 export function PreviewDock() {
   const [mode, setMode] = React.useState<PreviewMode>("text");
+  const [editAddr, setEditAddr] = React.useState("");
+  const [editValue, setEditValue] = React.useState("");
   const lastRun = useAppStore((s) => s.lastRun);
   const runningNodeId = useAppStore((s) => s.runningNodeId);
   const previewText = useAppStore((s) => s.previewText);
@@ -27,6 +29,15 @@ export function PreviewDock() {
   const hexBytes = useAppStore((s) => s.hexBytes);
   const hexLoading = useAppStore((s) => s.hexLoading);
   const loadHexPage = useAppStore((s) => s.loadHexPage);
+  const patchViewedByte = useAppStore((s) => s.patchViewedByte);
+
+  const applyPatch = () => {
+    const addr = Number.parseInt(editAddr, 16);
+    if (Number.isNaN(addr)) return;
+    void patchViewedByte(addr, editValue.trim()).then((ok) => {
+      if (ok) setEditValue("");
+    });
+  };
 
   React.useEffect(() => {
     if (
@@ -119,6 +130,45 @@ export function PreviewDock() {
           <span>
             {formatAddr(offsetNow)}–{formatAddr(pageEnd)} / {formatAddr(total)}
           </span>
+          {lastRun !== null && (
+            <>
+              <span className="text-text-muted">|</span>
+              <label className="flex items-center gap-1">
+                byte@
+                <input
+                  data-selectable
+                  value={editAddr}
+                  onChange={(e) => setEditAddr(e.target.value)}
+                  placeholder="addr"
+                  className={[
+                    "w-20 rounded-sm border border-border-default bg-surface-2 px-1.5 py-0.5",
+                    "outline-none focus:border-border-focus",
+                  ].join(" ")}
+                />
+              </label>
+              <input
+                data-selectable
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") applyPatch();
+                }}
+                placeholder="hh"
+                maxLength={2}
+                className={[
+                  "w-10 rounded-sm border border-border-default bg-surface-2 px-1.5 py-0.5 text-center",
+                  "outline-none focus:border-border-focus",
+                ].join(" ")}
+              />
+              <button
+                onClick={applyPatch}
+                disabled={!/^[0-9a-fA-F]{2}$/.test(editValue) || editAddr === ""}
+                className="rounded-sm border border-border-default px-2 py-0.5 enabled:hover:text-accent disabled:opacity-40"
+              >
+                patch
+              </button>
+            </>
+          )}
           {hexLoading && <span className="text-accent">loading…</span>}
         </div>
       )}

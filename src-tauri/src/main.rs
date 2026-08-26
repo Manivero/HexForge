@@ -26,6 +26,7 @@ fn main() {
             commands::create_literal_source,
             commands::preview_bytes,
             commands::release_source,
+            commands::patch_source,
             commands::set_graph,
             commands::run_node,
             commands::cancel_node,

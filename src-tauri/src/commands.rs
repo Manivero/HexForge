@@ -6,7 +6,7 @@
 use hexforge_engine::graph_dto::GraphDto;
 use hexforge_engine::error::{HexForgeError, HexForgeResult};
 use hexforge_engine::scheduler;
-use hexforge_engine::state::{AppState, SourceEntry};
+use hexforge_engine::state::{AppState, SourceEntry, WriteRegionError};
 use base64::{engine::general_purpose, Engine as _};
 use hexforge_core::graph::Graph;
 use serde::{Deserialize, Serialize};
@@ -230,7 +230,66 @@ fn parse_handle(raw: &str) -> HexForgeResult<Uuid> {
     Uuid::parse_str(raw).map_err(|_| HexForgeError::invalid_input(format!("'{raw}' is not a valid source handle")))
 }
 
-// ---------- Граф ----------
+// ---------- Patch source (FR Hex Editor) ----------
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchSourceRequest {
+    pub handle: String,
+    /// Смещение первого перезаписываемого байта.
+    pub offset: u64,
+    /// Байты для перезаписи (base64). Только в границах текущего размера.
+    pub bytes_base64: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchSourceResponse {
+    pub new_size_bytes: u64,
+}
+
+/// Точечная перезапись региона InMemory-источника (FR Hex Editor).
+/// Семантика MVP: без роста и без записи в memory-mapped файлы — обе
+/// ситуации возвращают типизированную ошибку. Content-addressed кэш
+/// планировщика не инвалидируется явно: ключи по content-hash, патч меняет
+/// хэши будущих прогонов естественным образом, старые снапшоты остаются
+/// корректными записями прошлого (FR-4.2).
+#[tauri::command]
+pub fn patch_source(
+    req: PatchSourceRequest,
+    state: State<Arc<AppState>>,
+) -> HexForgeResult<PatchSourceResponse> {
+    let handle = parse_handle(&req.handle)?;
+    let data = general_purpose::STANDARD
+        .decode(req.bytes_base64.as_bytes())
+        .map_err(|e| {
+            HexForgeError::invalid_parameter("bytesBase64", format!("not valid base64: {e}"))
+        })?;
+    let offset = usize::try_from(req.offset)
+        .map_err(|_| HexForgeError::invalid_parameter("offset", "offset is out of range"))?;
+
+    let mut sources = state.sources.write();
+    let new_size = sources.write_region(&handle, offset, &data).map_err(|e| match e {
+        WriteRegionError::UnknownHandle => {
+            HexForgeError::invalid_input(format!("unknown source handle: {}", req.handle))
+        }
+        WriteRegionError::OutOfBounds { size, required_end } => HexForgeError::invalid_parameter(
+            "bytesBase64",
+            format!(
+                "patch range [{offset}..{required_end}) exceeds source size {size}; growth is not supported in MVP"
+            ),
+        ),
+        WriteRegionError::ReadOnlyMapped => HexForgeError::invalid_input(
+            "source is a memory-mapped file and cannot be patched (read-only MVP)",
+        ),
+    })?;
+
+    Ok(PatchSourceResponse {
+        new_size_bytes: new_size as u64,
+    })
+}
+
+
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -980,6 +1039,29 @@ mod tests {
                 "requestedCapabilities": ["filesystem_read"],
                 "grantedCapabilities": [],
             })
+        );
+    }
+
+    #[test]
+    fn patch_source_dtos_match_ts_contract() {
+        let req = PatchSourceRequest {
+            handle: "h1".into(),
+            offset: 4096,
+            bytes_base64: "AQI=".into(), // [1, 2]
+        };
+        assert_eq!(
+            serde_json::to_value(&req).unwrap(),
+            serde_json::json!({
+                "handle": "h1",
+                "offset": 4096,
+                "bytesBase64": "AQI=",
+            })
+        );
+
+        let resp = PatchSourceResponse { new_size_bytes: 8192 };
+        assert_eq!(
+            serde_json::to_value(&resp).unwrap(),
+            serde_json::json!({ "newSizeBytes": 8192 })
         );
     }
 

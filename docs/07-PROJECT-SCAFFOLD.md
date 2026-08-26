@@ -56,7 +56,8 @@ hexforge/
 | Tauri command `greet` + полный IPC-слой (11 команд) | ✅ | `cargo build --workspace` проходит; иконки сгенерированы через `npx tauri icon` в `src-tauri/icons/` |
 | Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
 | Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 22 unit-теста командного слоя/состояния зелёные |
-| PreviewDock: постраничный HexViewer (страницы 4КБ, ◀▶/offset, ASCII) | ✅ | preview_bytes offset/length из контракта; рендер проверен headless-браузером |
+| PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset, ASCII) + патч байта | ✅ | preview_bytes + patch_source (перезапись InMemory в границах, Mapped read-only); golden ×2 |
+| Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | preview_bytes offset/length из контракта; рендер проверен headless-браузером |
 | Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | Поток 05-IPC §3: литерал → create_literal_source → debounced set_graph → run_node → preview_bytes; рендер проверен headless-браузером на vite dev (0 ошибок консоли, мягкая деградация без бэкенда); сквозной прогон с реальным invoke — за `npm run tauri dev` |
 | GraphCanvas (вертикальный срез DAG) | ✅ | Рельс + карточки узлов в BFS-порядке от корней, выбор кликом, маркер sourceHandle у корня; раскладка — чистая функция от nodes (замена на полноценный layout без смены API); boot smoke-test нативного бинаря: `[hexforge-core] initialized with 7 operations` |
 | InspectorPanel (FR-3.2) | ✅ | Авто-форма из paramsSchema (string+enum → select, boolean → checkbox, integer/number → number, string → text); onChange → updateNodeParams → debounced set_graph; stale-бейдж превью при мутации графа после запуска (видимая часть FR-1.6) |
@@ -101,8 +102,8 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 79/79 зелёных (Rust) + 14 FE-юнитов
-(core 9, ops 16, stream 7, engine 27, tauri 20, cli 4 — включая IPC-parity golden-тесты,
+Все изменения перепроверены: `cargo test --workspace` — 84/84 зелёных (Rust) + 14 FE-юнитов
+(core 9, ops 16, stream 7, engine 29, tauri 22, cli 4 — включая IPC-parity golden-тесты,
 планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
 `tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка,
 `npm run test:fe` — 14/14 (fuzzyMatch ⌘K + hex-viewer formatting).

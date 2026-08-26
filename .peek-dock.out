@@ -1,0 +1,1 @@
+"  \"outline-none focus:border-border-focus\",\n            ].join(\" \")}\n          />\n          <span>\n            {formatAddr(offsetNow)}–{formatAddr(pageEnd)} / {formatAddr(total)}\n          </span>\n          {hexLoading && <span className=\"text-accent"

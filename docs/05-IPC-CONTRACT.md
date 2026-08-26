@@ -128,6 +128,18 @@ export interface ReleaseSourceRequest {
 }
 /** invoke<void>("release_source", req) — явное освобождение памяти (FR "немедленная выгрузка") */
 
+export interface PatchSourceRequest {
+  handle: SourceHandle;
+  offset: number;
+  /** Перезаписываемые байты (base64). Только в границах текущего размера. */
+  bytesBase64: string;
+}
+export interface PatchSourceResponse {
+  newSizeBytes: number;
+}
+/** invoke<PatchSourceResponse>("patch_source", req) — точечная перезапись
+ *  InMemory-источника (FR Hex Editor MVP): без роста, Mapped — read-only. */
+
 // ---------- Commands: граф ----------
 
 export interface SetGraphRequest {

@@ -11,6 +11,8 @@ import type {
   JumpToSnapshotRequest,
   OpenFileRequest,
   OpenFileResponse,
+  PatchSourceRequest,
+  PatchSourceResponse,
   OperationDescriptor,
   PluginManifestDto,
   PreviewBytesRequest,
@@ -68,6 +70,10 @@ export function previewBytes(req: PreviewBytesRequest): Promise<PreviewBytesResp
 
 export function releaseSource(req: ReleaseSourceRequest): Promise<boolean> {
   return call<boolean>("release_source", { req });
+}
+
+export function patchSource(req: PatchSourceRequest): Promise<PatchSourceResponse> {
+  return call<PatchSourceResponse>("patch_source", { req });
 }
 
 export function setGraph(graph: GraphDto): Promise<void> {

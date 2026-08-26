@@ -6,7 +6,8 @@
 // Статус реализации на Rust-стороне на срезе hexforge-stream (см. commands.rs
 // и src-tauri/src/scheduler.rs):
 //   ✅ реализовано:  greet, listOperations, openFile, createLiteralSource,
-//                    previewBytes, releaseSource, setGraph,
+//                    previewBytes, releaseSource, patchSource,
+//                    setGraph,
 //                    runNode (async + spawn_blocking; chunked apply_chunk для
 //                    streamable-операций; memoization по reproducibility_key;
 //                    merge-узлы через MergeTransform/streaming.concat;
@@ -121,6 +122,17 @@ export interface PreviewBytesResponse {
 // ---------- release_source ----------
 export interface ReleaseSourceRequest {
   handle: SourceHandle;
+}
+
+// ---------- patch_source (Hex Editor) ----------
+export interface PatchSourceRequest {
+  handle: SourceHandle;
+  offset: number;
+  /** Перезаписываемые байты (base64). Только в границах текущего размера. */
+  bytesBase64: string;
+}
+export interface PatchSourceResponse {
+  newSizeBytes: number;
 }
 
 // ---------- set_graph ----------

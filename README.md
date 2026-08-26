@@ -32,6 +32,9 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
   источника с верификацией content-hash'ей и переносом головы истории;
   HistoryPanel — дерево по parent-ссылкам с маркерами ветвления,
   клик = прыжок; кнопка Cancel активирует кооперативную отмену из UI
+- ✅ Hex Editor MVP (FR §3): `patch_source` — точечная перезапись байтов
+  InMemory-источника в границах (Mapped read-only); форма патча байта
+  в HEX-режиме PreviewDock с автоперезагрузкой страницы
 - ✅ `hexforge-cli` (FR-7.3): `hexforge-cli run recipe.hexforge --in file
   --out file` на том же движке без GUI; формат рецепта = GraphDto JSON
 - ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный

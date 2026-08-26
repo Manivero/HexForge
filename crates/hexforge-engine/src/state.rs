@@ -52,6 +52,37 @@ impl SourceStore {
         self.entries.remove(handle).is_some()
     }
 
+    /// Перезаписывает регион существующего InMemory-источника (FR Hex Editor).
+    /// Семантика MVP: только точная перезапись в границах — без роста,
+    /// без записи в Mapped (файлы на диске остаются read-only).
+    pub fn write_region(
+        &mut self,
+        handle: &Uuid,
+        offset: usize,
+        data: &[u8],
+    ) -> Result<usize, WriteRegionError> {
+        let entry = self
+            .entries
+            .get_mut(handle)
+            .ok_or(WriteRegionError::UnknownHandle)?;
+        match entry {
+            SourceEntry::InMemory(buf) => {
+                let end = offset.checked_add(data.len()).ok_or(
+                    WriteRegionError::OutOfBounds { size: buf.len(), required_end: usize::MAX },
+                )?;
+                if end > buf.len() {
+                    return Err(WriteRegionError::OutOfBounds {
+                        size: buf.len(),
+                        required_end: end,
+                    });
+                }
+                buf[offset..end].copy_from_slice(data);
+                Ok(buf.len())
+            }
+            SourceEntry::Mapped(_) => Err(WriteRegionError::ReadOnlyMapped),
+        }
+    }
+
     /// Заменяет байты под существующим handle (нужен тестам целостности
     /// replay-реплея); false — handle неизвестен.
     #[cfg(test)]
@@ -63,6 +94,14 @@ impl SourceStore {
             false
         }
     }
+}
+
+/// Ошибки patch_source; маппинг в HexForgeError — на IPC-слое.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WriteRegionError {
+    UnknownHandle,
+    OutOfBounds { size: usize, required_end: usize },
+    ReadOnlyMapped,
 }
 
 /// Content-addressed LRU-кэш выходов узлов планировщика (см. scheduler.rs).
@@ -255,6 +294,45 @@ mod tests {
         // Результат больше бюджета не кэшируется вовсе.
         cache.put("huge".into(), Arc::new(vec![0; 500]));
         assert!(cache.get("huge").is_none());
+    }
+
+    #[test]
+    fn write_region_overwrites_in_memory_bounds_checked() {
+        use super::WriteRegionError;
+        let mut store = SourceStore::default();
+        let h = store.insert(SourceEntry::InMemory(b"HELLO".to_vec()));
+
+        let new_size = store.write_region(&h, 1, b"EY!").expect("in-bounds patch");
+        assert_eq!(new_size, 5);
+        // HELLO → HEY!O: три байта с позиции 1 заменены, хвост не тронут.
+        assert_eq!(store.get(&h).unwrap().as_bytes(), b"HEY!O");
+
+        // Выход за границы отвергается, содержимое не меняется.
+        let err = store.write_region(&h, 3, b"TOOLONG").unwrap_err();
+        assert_eq!(
+            err,
+            WriteRegionError::OutOfBounds { size: 5, required_end: 10 }
+        );
+        assert_eq!(store.get(&h).unwrap().as_bytes(), b"HEY!O");
+
+        // Нулевая длина по границе — допустимый no-op.
+        store.write_region(&h, 5, b"").unwrap();
+        assert_eq!(store.get(&h).unwrap().as_bytes(), b"HEY!O");
+
+        // Неизвестный handle.
+        assert_eq!(
+            store.write_region(&uuid::Uuid::new_v4(), 0, b"x"),
+            Err(WriteRegionError::UnknownHandle)
+        );
+    }
+
+    #[test]
+    fn write_region_error_variants_are_distinguishable() {
+        use super::WriteRegionError;
+        assert_ne!(
+            WriteRegionError::ReadOnlyMapped,
+            WriteRegionError::UnknownHandle
+        );
     }
 
     #[test]
