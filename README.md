@@ -1,80 +1,200 @@
 # HexForge
 
-VS Code для анализа и трансформации данных. Нативный преемник CyberChef:
-Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вместо
-линейного recipe, Command Palette (⌘K) как первичный интерфейс.
+Native desktop tool for data transformation and analysis — a CyberChef successor built on **Tauri v2 + Rust** with a **React 18** frontend and a **Node Graph** instead of linear recipes.
 
-## Документация (Этап 1 — проектирование)
+## What is HexForge
 
-1. [`docs/01-PRD.md`](docs/01-PRD.md) — функциональные и нефункциональные требования
-2. [`docs/02-COMPETITIVE-GAP-ANALYSIS.md`](docs/02-COMPETITIVE-GAP-ANALYSIS.md) — HexForge vs CyberChef
-3. [`docs/03-INFORMATION-ARCHITECTURE.md`](docs/03-INFORMATION-ARCHITECTURE.md) — дерево UI-компонентов
-4. [`docs/04-RUST-CORE-ARCHITECTURE.md`](docs/04-RUST-CORE-ARCHITECTURE.md) — Cargo workspace, трейт `Transform`
-5. [`docs/05-IPC-CONTRACT.md`](docs/05-IPC-CONTRACT.md) — полный TS-контракт Tauri commands
-6. [`docs/06-DESIGN-SYSTEM.md`](docs/06-DESIGN-SYSTEM.md) — design tokens (см. `tailwind.config.ts`)
-7. [`docs/07-PROJECT-SCAFFOLD.md`](docs/07-PROJECT-SCAFFOLD.md) — структура проекта + статус верификации
+HexForge is designed for security researchers, malware analysts, DFIR specialists, reverse engineers, and CTF players who need to decode, transform, and analyze arbitrary data — offline, natively, without browser limitations.
 
-## Статус реализации (Этап 2)
+Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (DAG) where each node is an operation with multiple inputs/outputs. The Command Palette (⌘K) is the primary interface: every action, operation, and navigation is available through keyboard-driven search.
 
-- ✅ `hexforge-core` + `hexforge-ops`: компилируются, unit-тесты зелёные
-  (Base32, Base64, BLAKE3, CRC32, Case Transform, Concat,
-  Hex, HTML entities, Reverse, ROT-N, ROT13, MD5, SHA-256, XOR, Strings Extract, URL enc/dec,
-  ROT13, MD5, SHA-256, BLAKE3, XOR, URL encode/decode,
-  streaming.concat; topo-sort/cycle-detection/fork-merge графа;
-  lineage-обход истории с защитой от parent-циклов)
-- ✅ React/TS strict фронтенд: `tsc --noEmit` чисто, `vite build` собирается,
-  ESLint без замечаний
-- ✅ Command Palette (⌘K) — первичный интерфейс, подключён к живому реестру
-  операций через типизированный IPC-слой
-- ✅ `hexforge-stream` MVP + `hexforge-engine`: chunked `apply_chunk`
-  для streamable-операций, memoization (content-addressed LRU, 256MB),
-  кооперативная отмена (`cancel_node` → `Cancelled`), merge-узлы через
-  `MergeTransform` + `streaming.concat`; движок вынесен из GUI-шелла в
-  крейт `hexforge-engine`, чанк-примитивы — в крейт `hexforge-stream`
-- ✅ Time-Travel (FR-4): `jump_to_snapshot` — lineage-реплей из корневого
-  источника с верификацией content-hash'ей и переносом головы истории;
-  HistoryPanel — дерево по parent-ссылкам с маркерами ветвления,
-  клик = прыжок; кнопка Cancel активирует кооперативную отмену из UI
-- ✅ Hex Editor MVP (FR §3): `patch_source` — точечная перезапись байтов
-  InMemory-источника в границах (Mapped read-only); патч байта/региона
-  (hex-пары) в HEX-режиме PreviewDock с автоперезагрузкой страницы
-- ✅ `hexforge-cli` (FR-7.3): `hexforge-cli run recipe.hexforge --in file
-  --out file` на том же движке без GUI; формат рецепта = GraphDto JSON
-- ✅ Первый сквозной поток данных (05-IPC §3): InputPanel (литеральный
-  источник) → debounced `set_graph` (120ms) → `Run node` → GraphCanvas
-  (вертикальный рельс DAG с выбором узлов) → PreviewDock — TEXT ≤4KB и постраничный
-  HexViewer (◀▶/переход по смещению, ASCII), stale-бейдж,
-  кнопка Cancel во время запуска; InspectorPanel —
-  авто-форма параметров из JSON Schema (FR-3.2); статус-бар со счётчиком
-  снапшотов; без нативного бэкенда UI деградирует мягко (vite dev)
-- ✅ `src-tauri` (мост Rust↔WebView): workspace собирается целиком
-  (`cargo build --workspace`), иконки сгенерированы (`src-tauri/icons/`),
-  `run_node` — async (spawn_blocking) со стримингом `op://progress`, пишет
-  Snapshot в Time-Travel History (blake3 content-hash'и); `list_snapshots`,
-  `export_recipe`/`import_recipe` реализованы; паритет IPC-типов защищён
-  golden-тестами; юнит-тесты командного слоя — зелёные
-- ⏳ Заглушки контракта: `list_plugins` (ждёт `hexforge-plugin-host`),
-  `import_cyberchef_recipe`
+## Key Features
 
-## Быстрый старт
+- **Node Graph workspace** — DAG-based data transformation pipeline
+- **Command Palette (⌘K)** — fuzzy search across all operations and commands
+- **Time-Travel History** — state DAG with jump-to-snapshot and branching
+- **Hex Viewer/Editor** — paginated hex dump with byte patching
+- **Parallel streaming pipeline** — chunked execution with backpressure and fusion
+- **Content-addressed caching** — memoization by reproducibility key
+- **CLI mode** — headless recipe runner for CI/scripting
+- **Recipe export/import** — portable JSON format
+
+## Operations
+
+### Encoding
+| Operation | Description |
+|-----------|-------------|
+| `base32.encode` / `base32.decode` | RFC 4648 Base32 |
+| `base64.encode` / `base64.decode` | Standard / URL-safe Base64 |
+| `hex.encode` / `hex.decode` | Hexadecimal encoding |
+| `protobuf.decode_raw` | Raw Protobuf wire-format walk |
+
+### Hashing
+| Operation | Description |
+|-----------|-------------|
+| `blake3` | BLAKE3 cryptographic hash (256-bit) |
+| `crc32` | IEEE CRC-32 checksum |
+| `md5` | MD5 hash |
+| `sha256` | SHA-256 hash |
+
+### Cryptography
+| Operation | Description |
+|-----------|-------------|
+| `rot_n` | ROT-N shift (0–25) |
+| `xor` | Byte-wise XOR with cycling UTF-8 key |
+
+### Network
+| Operation | Description |
+|-----------|-------------|
+| `url_encode` | Percent-encoding (RFC 3986) |
+| `url_decode` | Percent-decoding (+ → space) |
+
+### Text
+| Operation | Description |
+|-----------|-------------|
+| `case_transform` | Upper / lower / title case |
+| `html_encode` / `html_decode` | HTML entities (named + numeric) |
+| `reverse` | Byte-level reversal |
+| `rot13` | ROT13 substitution |
+
+### Streaming
+| Operation | Description |
+|-----------|-------------|
+| `concat` | N-ary input concatenation (MergeTransform) |
+
+### Binary Analysis
+| Operation | Description |
+|-----------|-------------|
+| `strings_extract` | Printable ASCII sequences (`strings(1)` equivalent) |
+| `entropy` | Shannon entropy (0–8 bits/byte) |
+
+## Architecture
+
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  React 18   │◄───►│   Tauri v2 IPC    │◄───►│  Rust Engine     │
+│  Frontend   │     │   (typed JSON)    │     │                  │
+└─────────────┘     └──────────────────┘     └────────┬─────────┘
+                                                       │
+                                              ┌────────▼────────┐
+                                              │ hexforge-engine  │
+                                              │ scheduler/cache  │
+                                              └────────┬────────┘
+                                                       │
+                     ┌──────────┬─────────────────────┼──────────┐
+                     │          │                     │          │
+                hexforge-  hexforge-            hexforge-  hexforge-
+                core       ops                 stream     cli
+```
+
+| Crate | Purpose |
+|-------|---------|
+| `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` |
+| `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) |
+| `hexforge-engine` | Execution engine: scheduler, cache, cancellation, history |
+| `src-tauri` | Tauri shell: typed IPC commands, frontend serving |
+| `hexforge-cli` | Headless recipe runner (no GUI) |
+
+Key design decisions:
+- **`Transform` trait** — single contract for all operations (sync, pure function)
+- **`MergeTransform` trait** — N-ary operations (e.g., concat)
+- **`inventory` crate** — compile-time registration, no central op list to maintain
+- **Fusion pipeline** — adjacent streamable nodes merged into one chunk loop; parallel stages via bounded channels
+- **Content-addressed LRU cache** — memoization keyed by `(op@version, input_hash, params)`
+- **Cooperative cancellation** — token-based, checked at chunk boundaries
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js ≥ 18
+- Rust ≥ 1.85 (via rustup)
+
+### Development
 
 ```bash
 npm install
-npm run dev          # фронтенд отдельно, http://localhost:1420
-# или, с установленным Rust ≥ 1.85:
-npm run tauri dev    # полное нативное приложение
+npm run dev          # Frontend only → http://localhost:1420
+npm run tauri dev    # Full native app (requires Rust)
 ```
 
-Проверки: `npm run lint`, `npm run test:fe`, `npm run build`, `cargo test --workspace`.
+### Production build
 
-CLI-режим (FR-7.3):
+```bash
+npm run tauri build
+```
+
+### CLI
 
 ```bash
 cargo run -p hexforge-cli -- run recipe.hexforge --in input.bin --out output.bin
+cargo run -p hexforge-cli -- validate recipe.hexforge
 ```
 
-## Дальше по плану MVP (см. PRD §3)
+## Testing
 
+```bash
+# Rust tests (all crates)
+cargo test --workspace
 
-`hexforge-plugin-host`
-(Wasmtime sandbox).
+# Static analysis
+cargo clippy --workspace --all-targets
+
+# Frontend lint + type check + build
+npm run lint
+npm run test:fe     # Unit tests (node:test, zero deps)
+npm run build       # tsc --noEmit + vite build
+```
+
+## Roadmap
+
+| Priority | Item |
+|----------|------|
+| Next | Compression ops (gzip/zlib via flate2) |
+| Next | Parallel pipeline tuning (64 MB chunks per FR-5.2) |
+| Near | Plugin host (Wasmtime sandbox, signed plugins) |
+| Near | Import CyberChef recipes |
+| Future | Diff between snapshots (FR-4.3) |
+| Future | Magic Wand — heuristic chain detection |
+| Future | More crypto: AES, ChaCha20, RC4 |
+| Deferred | Real-time collaboration, cloud sync, mobile clients |
+
+See [PRD §3](docs/01-PRD.md) for full requirements and [docs/07](docs/07-PROJECT-SCAFFOLD.md) for current implementation status.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Ensure all checks pass:
+   ```bash
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
+   npm run lint && npm run test:fe && npm run build
+   ```
+4. Commit with a descriptive message following [Conventional Commits](https://www.conventionalcommits.org/)
+5. Open a pull request
+
+## Security
+
+- **No network access** — fully offline; WebView has no direct fs/network permissions
+- **CSP enforced** — `default-src 'self'` in production builds
+- **Typed IPC** — all Tauri commands validated against TS contract; golden tests prevent drift
+- **No secrets in code** — environment variables excluded via `.gitignore`
+
+Report vulnerabilities privately to the maintainers. Do not open public issues for security concerns.
+
+## License
+
+[MIT](LICENSE)
+
+## Known Limitations
+
+- **Compression not yet implemented** — gzip/zlib/bzip2/lzma operations pending
+- **Plugin system not implemented** — Wasmtime host is designed but not built
+- **Mapped sources are read-only** — file-backed sources cannot be patched in place
+- **previewOnly flag ignored** — downstream recalculation never happens (single-node execution only)
+- **No multi-source graphs** — recipes assume exactly one root source node
+- **Cross-node pipelining incomplete** — sequential stage execution within fused runs; no concurrent chunk flow
+- **64 MB chunks not implemented** — default chunk size is 1 MiB (FR-5.2 target not met)
+- **No i18n** — architecture ready but en/ru translations not extracted

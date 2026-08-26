@@ -1,8 +1,34 @@
+# Rust / Cargo
+target/
+
+# Node.js / Vite
 node_modules/
 dist/
-target/
-Cargo.lock
-src-tauri/target/
-*.log
-.DS_Store
+.vite/
+
+# Frontend test build artifacts
 .fe-build/
+
+# Tauri build output
+src-tauri/target/
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
