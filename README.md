@@ -17,7 +17,8 @@ Tauri v2 + Rust ядро + React 18/TS strict фронтенд, Node Graph вм�
 ## Статус реализации (Этап 2)
 
 - ✅ `hexforge-core` + `hexforge-ops`: компилируются, unit-тесты зелёные
-  (Base32, Base64, CRC32, Hex, HTML entities,
+  (Base32, Base64, BLAKE3, CRC32, Case Transform, Concat,
+  Hex, HTML entities, Reverse, ROT-N, ROT13, MD5, SHA-256, XOR, Strings Extract, URL enc/dec,
   ROT13, MD5, SHA-256, BLAKE3, XOR, URL encode/decode,
   streaming.concat; topo-sort/cycle-detection/fork-merge графа;
   lineage-обход истории с защитой от parent-циклов)
