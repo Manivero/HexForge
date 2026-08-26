@@ -29,6 +29,7 @@ import type {
   SourceHandle,
 } from "@/lib/ipc-contract";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
+import { hexPairsToBytes } from "@/lib/bytes";
 import { findRootId } from "@/lib/graphWalk";
 import { removeNode } from "@/lib/graphMutate";
 
@@ -97,9 +98,9 @@ interface DataSlice {
   hexBytes: Uint8Array | null;
   hexLoading: boolean;
   loadHexPage: (offset: number) => Promise<void>;
-  /** Патч одного байта в просматриваемом буфере (FR Hex Editor MVP):
-   * перезапись в границах, затем перезагрузка страницы и инвалидация
-   * результата запуска (исходные байты изменились). */
+  /** Патч региона (hex-пары) в просматриваемом буфере (FR Hex Editor):
+   * перезапись в границах текущего размера, затем перезагрузка страницы
+   * и инвалидация результата запуска. */
   patchViewedByte: (offset: number, valueHex: string) => Promise<boolean>;
   /** Журнал истории (list_snapshots) в порядке записи; UI показывает
    * newest-first и инициирует прыжки (FR-4.1). */
@@ -413,15 +414,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
   applyServerStale: (ids) => set({ staleNodeIds: ids }),
   patchViewedByte: async (offset, valueHex) => {
     const lastRun = get().lastRun;
-    if (!lastRun || !/^[0-9a-fA-F]{2}$/.test(valueHex)) {
+    if (!lastRun) {
       return false;
     }
-    const byte = Number.parseInt(valueHex, 16);
+    // Конвертация через чистый хелпер: null при нечётной длине/чужих символах.
+    const bytes = hexPairsToBytes(valueHex);
+    if (bytes === null || bytes.length === 0 || bytes.length > PREVIEW_LENGTH_BYTES) {
+      return false;
+    }
     try {
+      // btoa принимает бинарную строку — собираем посимвольно
+      // (spread на десятках тысяч байт упирается в лимит аргументов).
+      let binary = "";
+      for (const byte of bytes) binary += String.fromCharCode(byte);
       await ipcPatchSource({
         handle: lastRun.outputHandle,
         offset,
-        bytesBase64: btoa(String.fromCharCode(byte)),
+        bytesBase64: btoa(binary),
       });
       // Буфер изменился → прошлый результат запуска больше не отражает его;
       // страница hex перезагружается, TEXT-превью сбрасывается.

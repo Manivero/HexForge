@@ -153,16 +153,20 @@ export function PreviewDock() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter") applyPatch();
                 }}
-                placeholder="hh"
-                maxLength={2}
+                placeholder="hex pairs"
+                title="Hex-пары: deadbeef или de ad (≤4КБ)"
                 className={[
-                  "w-10 rounded-sm border border-border-default bg-surface-2 px-1.5 py-0.5 text-center",
+                  "w-28 rounded-sm border border-border-default bg-surface-2 px-1.5 py-0.5",
                   "outline-none focus:border-border-focus",
                 ].join(" ")}
               />
               <button
                 onClick={applyPatch}
-                disabled={!/^[0-9a-fA-F]{2}$/.test(editValue) || editAddr === ""}
+                disabled={
+                  !/^[0-9a-fA-F]+$/.test(editValue.replace(/\s+/g, "")) ||
+                  editValue.replace(/\s+/g, "").length % 2 !== 0 ||
+                  editAddr === ""
+                }
                 className="rounded-sm border border-border-default px-2 py-0.5 enabled:hover:text-accent disabled:opacity-40"
               >
                 patch

@@ -68,3 +68,22 @@ export function buildHexRows(bytes: Uint8Array, baseOffset: number): HexRow[] {
 export function formatAddr(addr: number): string {
   return `0x${addr.toString(16).padStart(8, "0")}`;
 }
+
+/**
+ * Парсит строку hex-пар ("deadbeef", "DE AD" — пробелы игнорируются) в байты.
+ *
+ * @returns байты, либо null при нечётной длине / недопустимом символе /
+ *          пустой строке.
+ */
+export function hexPairsToBytes(s: string): Uint8Array | null {
+  const clean = s.replace(/\s+/g, "");
+  if (clean.length === 0 || clean.length % 2 !== 0) return null;
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i += 1) {
+    const pair = clean.slice(i * 2, i * 2 + 2);
+    const value = Number.parseInt(pair, 16);
+    if (Number.isNaN(value)) return null;
+    out[i] = value;
+  }
+  return out;
+}

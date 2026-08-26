@@ -57,7 +57,7 @@ hexforge/
 | Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
 | Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 22 unit-теста командного слоя/состояния зелёные |
 | Граф: удаление узла с мостом детей к родителю + Clear Graph | ✅ | lib/graphMutate removeNode — чистые мутации + FE-тесты; set_graph синхронизирует |
-| PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset, ASCII) + патч байта | ✅ | preview_bytes + patch_source (перезапись InMemory в границах, Mapped read-only); golden ×2 |
+| PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset, ASCII) + патч региона (hex-пары ≤ страницы) | ✅ | preview_bytes + patch_source (перезапись InMemory в границах, Mapped read-only); golden ×2 |
 | Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | preview_bytes offset/length из контракта; рендер проверен headless-браузером |
 | Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | Поток 05-IPC §3: литерал → create_literal_source → debounced set_graph → run_node → preview_bytes; рендер проверен headless-браузером на vite dev (0 ошибок консоли, мягкая деградация без бэкенда); сквозной прогон с реальным invoke — за `npm run tauri dev` |
 | GraphCanvas (вертикальный срез DAG) | ✅ | Рельс + карточки узлов в BFS-порядке от корней, выбор кликом, маркер sourceHandle у корня; раскладка — чистая функция от nodes (замена на полноценный layout без смены API); boot smoke-test нативного бинаря: `[hexforge-core] initialized with 7 operations` |

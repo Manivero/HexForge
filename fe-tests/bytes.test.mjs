@@ -2,7 +2,13 @@
 // lossy-декодирования — скомпилированные артефакты .fe-build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildHexRows, formatAddr, toLossyUtf8, toHexDump } from "../.fe-build/bytes.js";
+import {
+  buildHexRows,
+  formatAddr,
+  toLossyUtf8,
+  toHexDump,
+  hexPairsToBytes,
+} from "../.fe-build/bytes.js";
 
 test("короткий вход: один ряд с паддингом до 16 байт", () => {
   const rows = buildHexRows(new Uint8Array([0xde, 0xad]), 0);
@@ -63,3 +69,24 @@ test("toHexDump: пары через пробел, limit обрезает", () =
   assert.equal(toHexDump(new Uint8Array([0x01, 0x02]), 10), "01 02");
   assert.equal(toHexDump(new Uint8Array([1, 2, 3, 4]), 2), "01 02");
 });
+
+test("hexPairsToBytes: базовый парсинг", () => {
+  assert.deepEqual(hexPairsToBytes("deadbeef"), new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+});
+
+test("hexPairsToBytes: пробелы игнорируются", () => {
+  assert.deepEqual(hexPairsToBytes("de ad be ef"), new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+});
+
+test("hexPairsToBytes: нечётная длина → null", () => {
+  assert.equal(hexPairsToBytes("abc"), null);
+});
+
+test("hexPairsToBytes: недопустимый символ → null", () => {
+  assert.equal(hexPairsToBytes("zz"), null);
+});
+
+test("hexPairsToBytes: пустая строка → null", () => {
+  assert.equal(hexPairsToBytes(""), null);
+});
+
