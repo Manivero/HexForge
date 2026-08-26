@@ -50,6 +50,7 @@ export function GraphCanvas() {
   const selectedNodeId = useAppStore((s) => s.selectedNodeId);
   const selectNode = useAppStore((s) => s.selectNode);
   const runningNodeId = useAppStore((s) => s.runningNodeId);
+  const deleteNode = useAppStore((s) => s.deleteNode);
   const staleNodeIds = useAppStore((s) => s.staleNodeIds);
 
   const order = React.useMemo(() => layoutOrder(nodes), [nodes]);
@@ -83,7 +84,7 @@ export function GraphCanvas() {
               : null;
 
           return (
-            <li key={id} className="relative">
+            <li key={id} className="group relative">
               {/* Маркер узла на рельсе: корень без источника — idle, с
                   привязанным sourceHandle и все остальные — running/accent */}
               <span
@@ -97,7 +98,8 @@ export function GraphCanvas() {
                       : "bg-status-idle",
                 ].join(" ")}
               />
-              <button
+              <div className="relative flex-1">
+                <button
                 onClick={() => selectNode(id)}
                 data-node-id={id}
                 className={[
@@ -130,6 +132,18 @@ export function GraphCanvas() {
                   )}
                 </div>
               </button>
+              <button
+                aria-label="Delete node"
+                title="Удалить узел (дети мостятся к родителю)"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deleteNode(id);
+                }}
+                className="absolute right-1 top-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-2xs leading-none text-text-muted opacity-0 transition-opacity duration-fast hover:text-status-error focus:opacity-100 [li:hover_&]:opacity-100"
+              >
+                ✕
+              </button>
+            </div>
             </li>
           );
         })}

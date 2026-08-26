@@ -15,10 +15,14 @@ export interface PaletteCommand {
  * моста IPC. Палитра дублирует ЛЮБУЮ навигацию приложения, панели вторичны
  * (см. FR-2.5, 03-INFORMATION-ARCHITECTURE.md §1). Список растёт по мере
  * добавления панелей (History, Plugins, Files) в последующих срезах. */
-export function buildAppCommands(actions: {
+export interface AppActions {
   toggleTheme: () => void;
   runGreetTest: () => void;
-}): PaletteCommand[] {
+  clearGraph: () => void;
+  deleteSelectedNode: () => boolean;
+}
+
+export function buildAppCommands(actions: AppActions): PaletteCommand[] {
   return [
     {
       id: "app.toggle-theme",
@@ -35,6 +39,22 @@ export function buildAppCommands(actions: {
       hint: "Sanity-check IPC",
       keywords: ["greet", "bridge", "ipc", "health", "ping"],
       run: actions.runGreetTest,
+    },
+    {
+      id: "app.clear-graph",
+      groupId: "app",
+      label: "Clear Graph",
+      hint: "Remove all nodes",
+      keywords: ["clear", "graph", "reset", "nodes"],
+      run: actions.clearGraph,
+    },
+    {
+      id: "app.delete-selected",
+      groupId: "app",
+      label: "Delete Selected Node",
+      hint: "Bridge children to parent",
+      keywords: ["delete", "node", "remove", "selected"],
+      run: actions.deleteSelectedNode,
     },
   ];
 }

@@ -31,6 +31,9 @@ export function CommandPalette() {
   const operationsLoading = useAppStore((s) => s.operationsLoading);
   const loadOperations = useAppStore((s) => s.loadOperations);
   const addOperationNode = useAppStore((s) => s.addOperationNode);
+  const clearGraph = useAppStore((s) => s.clearGraph);
+  const deleteNode = useAppStore((s) => s.deleteNode);
+  const selectedForDelete = useAppStore((s) => s.selectedNodeId);
 
   const [query, setQuery] = React.useState("");
   const [bridgeStatus, setBridgeStatus] = React.useState<string | null>(null);
@@ -79,6 +82,8 @@ export function CommandPalette() {
   const allCommands = React.useMemo<PaletteCommand[]>(() => {
     const appCommands = buildAppCommands({
       toggleTheme,
+      clearGraph,
+      deleteSelectedNode: () => deleteNode(selectedForDelete ?? ""),
       runGreetTest: () => {
         setBridgeStatus("Checking...");
         greet("Architect")
@@ -91,7 +96,7 @@ export function CommandPalette() {
       closePalette();
     });
     return [...appCommands, ...opCommands];
-  }, [toggleTheme, operations, addOperationNode, closePalette]);
+  }, [toggleTheme, operations, addOperationNode, closePalette, clearGraph, deleteNode, selectedForDelete]);
 
   const filtered = React.useMemo(() => {
     if (query.trim().length === 0) return allCommands;

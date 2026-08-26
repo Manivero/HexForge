@@ -1,0 +1,34 @@
+pub fn list_operations(state: State<Arc<AppState>>) -> Vec<OperationDescriptor> {
+    state
+        .registry
+        .iter()
+        .map(|t| OperationDescriptor {
+            id: t.id().to_string(),
+            version: t.version().to_string(),
+            display_name: t.display_name().to_string(),
+            category: t.category().to_string(),
+            params_schema: t.params_schema(),
+            capabilities: t.capabilities(),
+        })
+        .collect()
+}
+
+// ---------- Источники данных ----------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenFileRequest {
+    pub path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenFileResponse {
+    pub handle: String,
+    pub size_bytes: u64,
+    pub detected_mime: Option<String>,
+}
+
+#[tauri::command]
+pub fn open_file(
+    req: Op

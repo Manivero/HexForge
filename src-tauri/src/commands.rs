@@ -38,9 +38,20 @@ pub struct OperationDescriptor {
     pub capabilities: hexforge_core::TransformCapabilities,
 }
 
+/// Детерминированный порядок операций для UI (⌘K): категория → имя → id.
+/// Итерация HashMap реестра неупорядочена — без сортировки список менялся бы
+/// между запусками приложения.
+fn sort_for_palette(v: &mut [OperationDescriptor]) {
+    v.sort_by(|a, b| {
+        a.category
+            .cmp(&b.category)
+            .then_with(|| a.display_name.cmp(&b.display_name))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+}
 #[tauri::command]
 pub fn list_operations(state: State<Arc<AppState>>) -> Vec<OperationDescriptor> {
-    state
+    let mut descriptors: Vec<OperationDescriptor> = state
         .registry
         .iter()
         .map(|t| OperationDescriptor {
@@ -51,7 +62,10 @@ pub fn list_operations(state: State<Arc<AppState>>) -> Vec<OperationDescriptor> 
             params_schema: t.params_schema(),
             capabilities: t.capabilities(),
         })
-        .collect()
+        .collect();
+    sort_for_palette(&mut descriptors);
+    descriptors
+
 }
 
 // ---------- Источники данных ----------
@@ -1040,6 +1054,48 @@ mod tests {
                 "grantedCapabilities": [],
             })
         );
+    }
+
+    #[test]
+    fn sort_for_palette_is_deterministic() {
+        let mk = |id: &str, cat: &str, name: &str| OperationDescriptor {
+            id: id.into(),
+            version: "1.0.0".into(),
+            display_name: name.into(),
+            category: cat.into(),
+            params_schema: serde_json::json!({}),
+            capabilities: hexforge_core::TransformCapabilities {
+                deterministic: true,
+                streamable: false,
+                memory_cost: hexforge_core::MemoryCost::FullBuffer,
+            },
+        };
+
+        // Перестановки одного набора дают идентичный порядок.
+        let mut v1 = vec![
+            mk("c", "Encoding", "To Hex"),
+            mk("a", "Encoding", "Base64 Decode"),
+            mk("b", "Hashing", "MD5"),
+        ];
+        sort_for_palette(&mut v1);
+
+        let mut v2 = vec![
+            mk("b", "Hashing", "MD5"),
+            mk("a", "Encoding", "Base64 Decode"),
+            mk("c", "Encoding", "To Hex"),
+        ];
+        sort_for_palette(&mut v2);
+
+        let ids: Vec<String> = v1.iter().map(|d| d.id.clone()).collect();
+        let ids2: Vec<String> = v2.iter().map(|d| d.id.clone()).collect();
+        assert_eq!(ids, ids2);
+        // Encoding < Hashing; внутри категории Base64 Decode < To Hex.
+        assert_eq!(ids, vec!["a", "c", "b"]);
+
+        // Тай-брейк по id при одинаковых category+name.
+        let mut v3 = vec![mk("zz", "T", "Same"), mk("aa", "T", "Same")];
+        sort_for_palette(&mut v3);
+        assert_eq!(v3[0].id, "aa");
     }
 
     #[test]

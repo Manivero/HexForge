@@ -1,0 +1,39 @@
+96                     : sourceHandle || node.inputs.length > 0
+97                       ? "bg-status-running"
+98                       : "bg-status-idle",
+99                 ].join(" ")}
+100               />
+101               <div className="relative flex-1">
+102                 <button
+103                 onClick={() => selectNode(id)}
+104                 data-node-id={id}
+105                 className={[
+106                   "w-full rounded-md border px-3 py-2 text-left transition-colors duration-fast ease-out-expo",
+107                   isSelected
+108                     ? "border-border-focus bg-surface-2"
+109                     : "border-border-subtle bg-surface-2 hover:border-border-default",
+110                 ].join(" ")}
+111               >
+112                 <div className="flex items-center justify-between gap-2">
+113                   <span className="font-mono text-xs text-text-primary">
+114                     {node.operationId}
+115                     {isRunning && (
+116                       <span className="ml-2 text-status-running">running…</span>
+117                     )}
+118                     {isStale && !isRunning && (
+119                       <span className="ml-2 text-status-stale">stale</span>
+120                     )}
+121                   </span>
+122                   <span className="text-2xs text-text-muted">
+123                     v{node.operationVersion}
+124                   </span>
+125                 </div>
+126                 <div className="mt-0.5 flex items-center justify-between gap-2 font-mono text-2xs text-text-muted">
+127                   <span>{id.slice(0, ID_SLICE)}</span>
+128                   {sourceHandle && (
+129                     <span className="text-status-stale">
+130                       src {sourceHandle.slice(0, ID_SLICE)}
+131                     </span>
+132                   )}
+133                 </div>
+TOTAL 142

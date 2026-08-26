@@ -30,6 +30,7 @@ import type {
 } from "@/lib/ipc-contract";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 import { findRootId } from "@/lib/graphWalk";
+import { removeNode } from "@/lib/graphMutate";
 
 export type Theme = "dark" | "light";
 
@@ -62,6 +63,11 @@ interface GraphSlice {
   /** Мерджит patch в params выбранного/указанного узла (FR-3.2:
    * форма параметров InspectorPanel) и планирует debounced set_graph. */
   updateNodeParams: (nodeId: string, patch: Record<string, unknown>) => void;
+  /** Удаляет узел, мостом переподключая его детей к его первому родителю
+   * (lib/graphMutate). Возвращает true, если узел существовал. */
+  deleteNode: (nodeId: NodeId) => boolean;
+  /** Полная очистка графа. */
+  clearGraph: () => void;
   /** Привязывает созданный источник к корню цепочки выделенного узла
    * (params.sourceHandle корневого узла, конвенция 05-IPC-CONTRACT.md). */
   assignSourceToRoot: () => boolean;
@@ -206,6 +212,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }));
     scheduleBackendSync(get());
     return id;
+  },
+  deleteNode: (nodeId) => {
+    const res = removeNode(get().nodes, nodeId);
+    if (!res.removed) return false;
+    set((s) => ({
+      nodes: res.nodes,
+      selectedNodeId: s.selectedNodeId === nodeId ? null : s.selectedNodeId,
+      graphVersion: s.graphVersion + 1,
+    }));
+    scheduleBackendSync(get());
+    return true;
+  },
+  clearGraph: () => {
+    set((s) => ({
+      nodes: {},
+      selectedNodeId: null,
+      graphVersion: s.graphVersion + 1,
+      staleNodeIds: [],
+      lastRun: null,
+      ranAtGraphVersion: null,
+      previewText: null,
+      previewHex: null,
+      previewTruncated: false,
+    }));
+    scheduleBackendSync(get());
   },
   updateNodeParams: (nodeId, patch) => {
     const node = get().nodes[nodeId];
