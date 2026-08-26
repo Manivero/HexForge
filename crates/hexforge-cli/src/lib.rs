@@ -116,3 +116,21 @@ pub fn run_recipe(
         executed_nodes,
     })
 }
+/// Валидация рецепта без запуска: проверяет JSON, UUID, DAG, наличие
+/// операций в реестре и соответствие версий. Для CI-пайплайнов (FR-7.3).
+pub fn validate_recipe(recipe_path: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(recipe_path)
+        .map_err(|e| format!("cannot read recipe '{recipe_path}': {e}"))?;
+    let dto: hexforge_engine::graph_dto::GraphDto = serde_json::from_str(&text)
+        .map_err(|e| format!("'{recipe_path}' is not a valid recipe file: {e}"))?;
+
+    let registry = hexforge_ops::build_registry();
+    let graph = hexforge_engine::graph_dto::validate_graph(dto, &registry)
+        .map_err(|e| e.message)?;
+
+    Ok(format!(
+        "recipe valid: {} node(s), {} operation(s) in registry",
+        graph.nodes.len(),
+        registry.len()
+    ))
+}
