@@ -7,6 +7,7 @@
 //! до 400+ операций без узкого места в одном файле.
 
 pub mod crypto;
+pub mod binary;
 pub mod encoding;
 pub mod hashing;
 pub mod network;
