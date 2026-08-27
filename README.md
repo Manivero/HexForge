@@ -50,6 +50,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `xor` | Byte-wise XOR with cycling UTF-8 key |
 | `rc4` | RC4 stream cipher (hexKey support) |
 | `aes.encrypt` / `aes.decrypt` | AES-128/192/256 ECB/CBC (PKCS7, hex key/iv) |
+| `chacha20` | ChaCha20 stream cipher (hex key/nonce) |
 
 ### Network
 | Operation | Description |
@@ -177,7 +178,7 @@ npm run build       # tsc --noEmit + vite build
 | Near | Import CyberChef recipes |
 | Future | Diff between snapshots (FR-4.3) |
 | Future | Magic Wand — heuristic chain detection |
-| Future | More crypto: ChaCha20 |
+| Future | Crypto GCM modes, additional ciphers |
 | Deferred | Real-time collaboration, cloud sync, mobile clients |
 
 See [PRD §3](docs/01-PRD.md) for full requirements and [docs/07](docs/07-PROJECT-SCAFFOLD.md) for current implementation status.
