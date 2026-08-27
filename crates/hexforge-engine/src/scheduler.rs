@@ -923,6 +923,39 @@ pub(crate) fn record_output(
     id
 }
 
+/// FR-4.3: diff между двумя снапшотами — байтовый/строчный diff их выходов.
+/// Возвращает текстовый diff; "equal\n" если выходы идентичны.
+pub fn diff_snapshots(state: &AppState, a: hexforge_core::SnapshotId, b: hexforge_core::SnapshotId) -> HexForgeResult<String> {
+    let out_a = replay_snapshot(state, a)?;
+    let out_b = replay_snapshot(state, b)?;
+    if out_a == out_b {
+        return Ok("equal\n".into());
+    }
+    let s_a = String::from_utf8_lossy(&out_a);
+    let s_b = String::from_utf8_lossy(&out_b);
+    let lines_a: Vec<&str> = s_a.lines().collect();
+    let lines_b: Vec<&str> = s_b.lines().collect();
+    let mut out = String::new();
+    out.push_str(&format!("--- snapshot {a}\n+++ snapshot {b}\n"));
+    let max = lines_a.len().max(lines_b.len());
+    for i in 0..max {
+        match (lines_a.get(i), lines_b.get(i)) {
+            (Some(la), Some(lb)) if la == lb => out.push_str(&format!(" {la}\n")),
+            (Some(la), Some(lb)) => out.push_str(&format!("-{la}\n+{lb}\n")),
+            (Some(la), None) => out.push_str(&format!("-{la}\n")),
+            (None, Some(lb)) => out.push_str(&format!("+{lb}\n")),
+            (None, None) => {}
+        }
+    }
+    if out.lines().count() <= 2 {
+        // Бинарный fallback: первый различающийся байт
+        let pos = out_a.iter().zip(out_b.iter()).position(|(x, y)| x != y).unwrap_or(0);
+        out.push_str(&format!("binary diff at offset 0x{pos:08x}: {:02x?} vs {:02x?}\n", out_a.get(pos).copied(), out_b.get(pos).copied()));
+        out.push_str(&format!("lengths: {} vs {}\n", out_a.len(), out_b.len()));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

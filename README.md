@@ -188,8 +188,8 @@ npm run build       # tsc --noEmit + vite build
 | Next | i18n extraction (en/ru) |
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
 | Near | Import CyberChef recipes |
-| Future | Diff between snapshots (FR-4.3) |
 | Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
+| Done | Diff between snapshots (FR-4.3) — `diff_snapshots` |
 | Future | Crypto GCM modes, additional ciphers |
 | Deferred | Real-time collaboration, cloud sync, mobile clients |
 

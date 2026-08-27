@@ -6,6 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CreateLiteralSourceRequest,
   CreateLiteralSourceResponse,
+  DiffSnapshotsRequest,
+  DiffSnapshotsResponse,
   GraphDto,
   HexForgeError,
   JumpToSnapshotRequest,
@@ -94,6 +96,10 @@ export function jumpToSnapshot(req: JumpToSnapshotRequest): Promise<RunNodeRespo
 
 export function listSnapshots(): Promise<SnapshotDto[]> {
   return call<SnapshotDto[]>("list_snapshots");
+}
+
+export function diffSnapshots(req: DiffSnapshotsRequest): Promise<DiffSnapshotsResponse> {
+  return call<DiffSnapshotsResponse>("diff_snapshots", { req });
 }
 
 export function listPlugins(): Promise<PluginManifestDto[]> {

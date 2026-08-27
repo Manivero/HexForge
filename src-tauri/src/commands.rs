@@ -708,6 +708,33 @@ fn list_snapshots_inner(state: &AppState) -> Vec<SnapshotDto> {
         .collect()
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffSnapshotsRequest {
+    pub a_snapshot_id: String,
+    pub b_snapshot_id: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffSnapshotsResponse {
+    pub diff_text: String,
+}
+
+#[tauri::command]
+pub async fn diff_snapshots(
+    req: DiffSnapshotsRequest,
+    state: State<'_, Arc<AppState>>,
+) -> HexForgeResult<DiffSnapshotsResponse> {
+    let a = parse_handle(&req.a_snapshot_id)?;
+    let b = parse_handle(&req.b_snapshot_id)?;
+    let exec_state = Arc::clone(state.inner());
+    let diff = tauri::async_runtime::spawn_blocking(move || scheduler::diff_snapshots(&exec_state, a, b))
+        .await
+        .map_err(|e| HexForgeError::internal(format!("diff worker failed: {e}")))??;
+    Ok(DiffSnapshotsResponse { diff_text: diff })
+}
+
 // ---------- Плагины (заглушки контракта на Этапе 2) ----------
 
 #[derive(Debug, Serialize)]

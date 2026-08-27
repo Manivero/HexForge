@@ -34,6 +34,7 @@ fn main() {
             commands::import_recipe,
             commands::jump_to_snapshot,
             commands::list_snapshots,
+            commands::diff_snapshots,
             commands::list_plugins,
         ])
         .run(tauri::generate_context!())

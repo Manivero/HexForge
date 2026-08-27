@@ -14,7 +14,7 @@
 //                    события op://progress; Snapshot в History за каждый узел),
 //                    setGraph (+ эмит graph://invalidated со staleNodeIds),
 //                    cancelNode (кооперативная отмена, kind="Cancelled"),
-//                    listSnapshots, exportRecipe, importRecipe,
+//                    listSnapshots, diffSnapshots, exportRecipe, importRecipe,
 //                    jumpToSnapshot (lineage-реплей из корневого источника,
 //                    перенос головы истории),
 //                    listPlugins (заглушка до hexforge-plugin-host)
@@ -170,6 +170,14 @@ export interface SnapshotDto {
 
 export interface JumpToSnapshotRequest {
   snapshotId: SnapshotId;
+}
+
+export interface DiffSnapshotsRequest {
+  aSnapshotId: SnapshotId;
+  bSnapshotId: SnapshotId;
+}
+export interface DiffSnapshotsResponse {
+  diffText: string;
 }
 
 // ---------- recipe export/import (⏳ не подключено) ----------
