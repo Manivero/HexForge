@@ -1333,6 +1333,7 @@ dependencies = [
  "hexforge-core",
  "inventory",
  "md-5",
+ "regex",
  "serde",
  "serde_json",
  "sha1",

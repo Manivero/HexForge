@@ -54,12 +54,15 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 |-----------|-------------|
 | `url_encode` | Percent-encoding (RFC 3986) |
 | `url_decode` | Percent-decoding (+ → space) |
+| `jwt_decode` | JWT header/payload decode (base64url) |
 
 ### Text
 | Operation | Description |
 |-----------|-------------|
 | `case_transform` | Upper / lower / title case |
 | `html_encode` / `html_decode` | HTML entities (named + numeric) |
+| `regex_extract` | Regex extract matches (one per line) |
+| `regex_replace` | Regex replace with captures ($1) |
 | `reverse` | Byte-level reversal |
 | `rot13` | ROT13 substitution |
 
