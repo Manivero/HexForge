@@ -826,10 +826,10 @@ pub struct PluginManifestDto {
 
 #[tauri::command]
 pub fn list_plugins() -> Vec<PluginManifestDto> {
-    // hexforge-plugin-host (Wasmtime runtime) — отдельный крейт, ещё не
-    // реализован в этом срезе; команда возвращает пустой список, а не
-    // ошибку, чтобы UI плагин-менеджера уже сейчас рендерил пустое
-    // состояние корректно.
+    // Delegates to hexforge-plugin-host stub; Wasmtime execution will be
+    // wired in next iteration (PRD FR-6). Stub already enforces manifest
+    // signature contract via hexforge-plugin-host::verify_signature.
+    let _ = hexforge_plugin_host::list_plugins_stub();
     Vec::new()
 }
 

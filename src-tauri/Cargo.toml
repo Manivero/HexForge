@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 hexforge-core = { path = "../crates/hexforge-core" }
 hexforge-engine = { path = "../crates/hexforge-engine" }
 hexforge-ops = { path = "../crates/hexforge-ops" }
+hexforge-plugin-host = { path = "../crates/hexforge-plugin-host" }
 
 tauri = { version = "2", features = [] }
 serde = { workspace = true }

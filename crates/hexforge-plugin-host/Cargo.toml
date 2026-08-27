@@ -1,0 +1,15 @@
+[package]
+name = "hexforge-plugin-host"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+hexforge-core = { path = "../hexforge-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
+rand = "0.8"

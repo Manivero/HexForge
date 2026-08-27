@@ -123,9 +123,10 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` |
-| `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) |
-| `hexforge-engine` | Execution engine: scheduler, cache, cancellation, history |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (142 tests) |
+| `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
+| `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
+| `hexforge-plugin-host` | Ed25519 manifest verify + stub Wasmtime host (FR-6) |
 | `src-tauri` | Tauri shell: typed IPC commands, frontend serving |
 | `hexforge-cli` | Headless recipe runner (no GUI) |
 
@@ -186,7 +187,7 @@ npm run build       # tsc --noEmit + vite build
 |----------|------|
 | Next | Native performance profiling (NFR-1 <16 ms) |
 | Done | i18n en/ru — `src/lib/i18n.ts` + locale toggle |
-| Near | Plugin host (Wasmtime sandbox, signed plugins) |
+| Near | Plugin host — stub `hexforge-plugin-host` Ed25519 verify, Wasmtime next |
 | Done | Import CyberChef recipes — `import_cyberchef_recipe` |
 | Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
 | Done | Diff between snapshots (FR-4.3) — `diff_snapshots` |
@@ -224,7 +225,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 ## Known Limitations
 
 - **Compression fully implemented** — gzip/zlib/deflate/bzip2/lzma done
-- **Plugin system not implemented** — Wasmtime host is designed but not built
+- **Plugin host stub** — `hexforge-plugin-host` Ed25519 verify done, Wasmtime execution next
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
