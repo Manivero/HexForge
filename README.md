@@ -101,7 +101,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 ### Binary Analysis
 | Operation | Description |
 |-----------|-------------|
-| `strings_extract` | Printable ASCII sequences (`strings(1)` equivalent) |
+| `strings_extract` | Printable ASCII/UTF-16LE/BE sequences (`strings(1)` + UTF-16) |
 | `entropy` | Shannon entropy (0–8 bits/byte) |
 | `elf_info` | ELF header parse (goblin) |
 | `pe_info` | PE header parse (goblin) |

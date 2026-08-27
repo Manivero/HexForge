@@ -75,6 +75,50 @@ impl Transform for StringsExtract {
             out.push('\n');
         }
 
+        // UTF-16LE: recover strings like H\x00e\x00l\x00l\x00o\x00
+        let mut current16 = String::new();
+        let bytes = input.as_ref();
+        let mut i = 0usize;
+        while i + 1 < bytes.len() {
+            if bytes[i + 1] == 0 && (0x20..=0x7e).contains(&bytes[i]) {
+                current16.push(bytes[i] as char);
+                i += 2;
+            } else {
+                if current16.len() >= min_length {
+                    out.push_str(&current16);
+                    out.push_str(" (utf16le)\n");
+                }
+                current16.clear();
+                // Advance by 1 to catch misaligned sequences
+                i += 1;
+            }
+        }
+        if current16.len() >= min_length {
+            out.push_str(&current16);
+            out.push_str(" (utf16le)\n");
+        }
+
+        // UTF-16BE: 0x00 + printable
+        let mut current_be = String::new();
+        i = 0;
+        while i + 1 < bytes.len() {
+            if bytes[i] == 0 && (0x20..=0x7e).contains(&bytes[i + 1]) {
+                current_be.push(bytes[i + 1] as char);
+                i += 2;
+            } else {
+                if current_be.len() >= min_length {
+                    out.push_str(&current_be);
+                    out.push_str(" (utf16be)\n");
+                }
+                current_be.clear();
+                i += 1;
+            }
+        }
+        if current_be.len() >= min_length {
+            out.push_str(&current_be);
+            out.push_str(" (utf16be)\n");
+        }
+
         Ok(Cow::Owned(out.into_bytes()))
     }
 }
@@ -418,5 +462,16 @@ mod tests {
         let ctx = NullExecutionContext;
         let err = MachoInfo.apply(Cow::Borrowed(b"MZ fake"), &json!({}), &ctx).unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn strings_extracts_utf16le() {
+        let ctx = NullExecutionContext;
+        // "Hi" as UTF-16LE: H\x00 i\x00
+        let data = b"H\x00i\x00\x00\x00B\x00y\x00e\x00";
+        let out = StringsExtract.apply(Cow::Borrowed(data), &json!({ "min_length": 2 }), &ctx).unwrap();
+        let s = String::from_utf8(out.into_owned()).unwrap();
+        assert!(s.contains("Hi (utf16le)"));
+        assert!(s.contains("Bye (utf16le)"));
     }
 }
