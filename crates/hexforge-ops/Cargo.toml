@@ -29,6 +29,8 @@ chacha20 = "0.9"
 xz2 = "0.1"
 url = "2"
 quick-xml = "0.31"
+rmp-serde = "1"
+rmp = "0.8"
 inventory = "0.3"
 
 [dev-dependencies]

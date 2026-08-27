@@ -31,6 +31,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `quoted_printable.encode` / `decode` | Quoted-Printable (RFC 2045) |
 | `json.pretty` / `json.minify` | JSON formatting |
 | `xml.pretty` | XML pretty-print |
+| `msgpack.decode` | MessagePack to JSON |
 | `protobuf.decode_raw` | Raw Protobuf wire-format walk |
 
 ### Hashing
