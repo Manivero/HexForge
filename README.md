@@ -47,6 +47,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `sha256` | SHA-256 hash |
 | `sha512` | SHA-512 hash |
 | `sha3_256` | SHA3-256 hash |
+| `ssdeep` | SSDEEP fuzzy hash |
 
 ### Cryptography
 | Operation | Description |

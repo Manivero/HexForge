@@ -225,6 +225,30 @@ impl Transform for Blake2sHash {
     }
 }
 
+pub struct SsdeepHash;
+
+impl Transform for SsdeepHash {
+    fn id(&self) -> &'static str {
+        "hashing.ssdeep"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "SSDEEP"
+    }
+    fn category(&self) -> &'static str {
+        "Hashing"
+    }
+    fn capabilities(&self) -> TransformCapabilities {
+        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::Constant }
+    }
+    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+        let hash = fuzzyhash::FuzzyHash::new(input.as_ref()).to_string();
+        Ok(Cow::Owned(hash.into_bytes()))
+    }
+}
+
 inventory::submit! { crate::TransformEntry(&Md5Hash) }
 inventory::submit! { crate::TransformEntry(&Sha256Hash) }
 inventory::submit! { crate::TransformEntry(&Sha1Hash) }
@@ -232,6 +256,7 @@ inventory::submit! { crate::TransformEntry(&Sha512Hash) }
 inventory::submit! { crate::TransformEntry(&Sha3_256Hash) }
 inventory::submit! { crate::TransformEntry(&Blake2bHash) }
 inventory::submit! { crate::TransformEntry(&Blake2sHash) }
+inventory::submit! { crate::TransformEntry(&SsdeepHash) }
 
 #[cfg(test)]
 mod tests {
@@ -293,5 +318,14 @@ mod tests {
         let out2 = Blake2sHash.apply(Cow::Borrowed(b"abc"), &serde_json::json!({}), &ctx).unwrap();
         assert_ne!(out, out2);
         assert_eq!(out2.len(), 64);
+    }
+
+    #[test]
+    fn ssdeep_hash() {
+        let ctx = NullExecutionContext;
+        let out = SsdeepHash.apply(Cow::Borrowed(b"Hello ssdeep test input for fuzzy hashing"), &serde_json::json!({}), &ctx).unwrap();
+        let s = String::from_utf8(out.into_owned()).unwrap();
+        assert!(s.contains(':'), "ssdeep format blocksize:hash:hash");
+        assert!(s.len() > 10);
     }
 }
