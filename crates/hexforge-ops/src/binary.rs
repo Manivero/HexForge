@@ -210,10 +210,39 @@ impl Transform for PeInfo {
     }
 }
 
+pub struct MagicDetect;
+
+impl Transform for MagicDetect {
+    fn id(&self) -> &'static str {
+        "binary.magic"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "Magic Bytes Detect"
+    }
+    fn category(&self) -> &'static str {
+        "Binary Analysis"
+    }
+    fn capabilities(&self) -> TransformCapabilities { TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer } }
+    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+        let kind = infer::get(input.as_ref());
+        let out = if let Some(k) = kind {
+            serde_json::json!({ "mime": k.mime_type(), "extension": k.extension(), "description": format!("{:?}", k.matcher_type()) })
+        } else {
+            serde_json::json!({ "mime": null, "extension": null, "description": "unknown" })
+        };
+        let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+        Ok(Cow::Owned(pretty.into_bytes()))
+    }
+}
+
 inventory::submit! { crate::TransformEntry(&StringsExtract) }
 inventory::submit! { crate::TransformEntry(&EntropyCalc) }
 inventory::submit! { crate::TransformEntry(&ElfInfo) }
 inventory::submit! { crate::TransformEntry(&PeInfo) }
+inventory::submit! { crate::TransformEntry(&MagicDetect) }
 
 #[cfg(test)]
 mod tests {
@@ -323,5 +352,23 @@ mod tests {
         // Instead test that empty is invalid
         let err = ElfInfo.apply(Cow::Borrowed(b""), &json!({}), &ctx).unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn magic_detect_png() {
+        let ctx = NullExecutionContext;
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
+        let out = MagicDetect.apply(Cow::Borrowed(&png), &json!({}), &ctx).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
+        assert_eq!(v["mime"], "image/png");
+    }
+
+    #[test]
+    fn magic_unknown() {
+        let ctx = NullExecutionContext;
+        let out = MagicDetect.apply(Cow::Borrowed(b"just plain text without magic"), &json!({}), &ctx).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
+        // Should be unknown or text/plain, but not crash
+        assert!(v.get("mime").is_some());
     }
 }

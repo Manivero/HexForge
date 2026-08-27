@@ -1439,6 +1439,7 @@ dependencies = [
  "goblin",
  "hex",
  "hexforge-core",
+ "infer",
  "inventory",
  "md-5",
  "quick-xml 0.31.0",

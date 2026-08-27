@@ -97,6 +97,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `entropy` | Shannon entropy (0–8 bits/byte) |
 | `elf_info` | ELF header parse (goblin) |
 | `pe_info` | PE header parse (goblin) |
+| `magic` | Magic bytes detect via infer |
 
 ## Architecture
 

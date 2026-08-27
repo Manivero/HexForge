@@ -33,6 +33,7 @@ quick-xml = "0.31"
 rmp-serde = "1"
 rmp = "0.8"
 goblin = "0.8"
+infer = "0.19"
 inventory = "0.3"
 
 [dev-dependencies]
