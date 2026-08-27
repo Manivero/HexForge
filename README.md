@@ -38,6 +38,8 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Operation | Description |
 |-----------|-------------|
 | `blake3` | BLAKE3 cryptographic hash (256-bit) |
+| `blake2b` | BLAKE2b-512 hash |
+| `blake2s` | BLAKE2s-256 hash |
 | `crc32` | IEEE CRC-32 checksum |
 | `md5` | MD5 hash |
 | `sha1` | SHA-1 hash |
