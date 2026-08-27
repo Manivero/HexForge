@@ -28,6 +28,8 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `base58.encode` / `base58.decode` | Bitcoin Base58 |
 | `base64.encode` / `base64.decode` | Standard / URL-safe Base64 |
 | `hex.encode` / `hex.decode` | Hexadecimal encoding |
+| `quoted_printable.encode` / `decode` | Quoted-Printable (RFC 2045) |
+| `json.pretty` / `json.minify` | JSON formatting |
 | `protobuf.decode_raw` | Raw Protobuf wire-format walk |
 
 ### Hashing
