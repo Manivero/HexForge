@@ -238,11 +238,52 @@ impl Transform for MagicDetect {
     }
 }
 
+pub struct MachoInfo;
+
+impl Transform for MachoInfo {
+    fn id(&self) -> &'static str {
+        "binary.macho_info"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "Mach-O Info"
+    }
+    fn category(&self) -> &'static str {
+        "Binary Analysis"
+    }
+    fn capabilities(&self) -> TransformCapabilities { TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer } }
+    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+        let obj = goblin::Object::parse(input.as_ref()).map_err(|e| TransformError::InvalidInput { reason: format!("Mach-O parse failed: {e}") })?;
+        match obj {
+            goblin::Object::Mach(goblin::mach::Mach::Binary(macho)) => {
+                let out = serde_json::json!({
+                    "cputype": macho.header.cputype,
+                    "cpusubtype": macho.header.cpusubtype,
+                    "filetype": macho.header.filetype,
+                    "ncmds": macho.header.ncmds,
+                    "is_64": macho.is_64,
+                });
+                let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+                Ok(Cow::Owned(pretty.into_bytes()))
+            }
+            goblin::Object::Mach(goblin::mach::Mach::Fat(fat)) => {
+                let out = serde_json::json!({ "fat": true, "narches": fat.narches });
+                let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+                Ok(Cow::Owned(pretty.into_bytes()))
+            }
+            _ => Err(TransformError::InvalidInput { reason: "not a Mach-O file (magic FEEDFACE/FAT not found)".into() }),
+        }
+    }
+}
+
 inventory::submit! { crate::TransformEntry(&StringsExtract) }
 inventory::submit! { crate::TransformEntry(&EntropyCalc) }
 inventory::submit! { crate::TransformEntry(&ElfInfo) }
 inventory::submit! { crate::TransformEntry(&PeInfo) }
 inventory::submit! { crate::TransformEntry(&MagicDetect) }
+inventory::submit! { crate::TransformEntry(&MachoInfo) }
 
 #[cfg(test)]
 mod tests {
@@ -370,5 +411,12 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
         // Should be unknown or text/plain, but not crash
         assert!(v.get("mime").is_some());
+    }
+
+    #[test]
+    fn macho_info_rejects_non_macho() {
+        let ctx = NullExecutionContext;
+        let err = MachoInfo.apply(Cow::Borrowed(b"MZ fake"), &json!({}), &ctx).unwrap_err();
+        assert!(matches!(err, TransformError::InvalidInput { .. }));
     }
 }
