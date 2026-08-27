@@ -1418,6 +1418,7 @@ dependencies = [
  "hexforge-core",
  "inventory",
  "md-5",
+ "quick-xml 0.31.0",
  "regex",
  "serde",
  "serde_json",
@@ -1425,6 +1426,7 @@ dependencies = [
  "sha2",
  "sha3",
  "unicode-normalization",
+ "url",
  "xz2",
 ]
 
@@ -2488,7 +2490,7 @@ checksum = "7da1d65da6dd5d1e44199ac0f58712d241c0f439f80adea8924d832384087f85"
 dependencies = [
  "base64 0.22.1",
  "indexmap 2.14.0",
- "quick-xml",
+ "quick-xml 0.41.0",
  "serde",
  "time",
 ]
@@ -2615,6 +2617,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

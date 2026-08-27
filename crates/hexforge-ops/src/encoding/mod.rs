@@ -5,3 +5,4 @@ pub mod hex;
 pub mod json;
 pub mod protobuf;
 pub mod quoted_printable;
+pub mod xml;
