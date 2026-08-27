@@ -32,6 +32,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `json.pretty` / `json.minify` | JSON formatting |
 | `xml.pretty` | XML pretty-print |
 | `msgpack.decode` | MessagePack to JSON |
+| `auto_decode` | Magic Wand auto-detect (base64/hex) |
 | `protobuf.decode_raw` | Raw Protobuf wire-format walk |
 
 ### Hashing
@@ -188,7 +189,7 @@ npm run build       # tsc --noEmit + vite build
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
 | Near | Import CyberChef recipes |
 | Future | Diff between snapshots (FR-4.3) |
-| Future | Magic Wand — heuristic chain detection |
+| Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
 | Future | Crypto GCM modes, additional ciphers |
 | Deferred | Real-time collaboration, cloud sync, mobile clients |
 
