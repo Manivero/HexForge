@@ -21,6 +21,10 @@ bzip2 = "0.4"
 flate2 = "1.0"
 regex = "1"
 unicode-normalization = "0.1"
+aes = "0.8"
+cbc = "0.1"
+cipher = "0.4"
+ecb = "0.1"
 inventory = "0.3"
 
 [dev-dependencies]
