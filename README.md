@@ -229,4 +229,4 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
 - **Parallel streaming pipeline** — fusion + bounded channels (4×64 MiB = 256 MiB per stage) implemented per FR-5.2
 - **64 MB chunks implemented** — `DEFAULT_CHUNK_SIZE_BYTES = 64 MiB` for file I/O and `apply_chunk`
-- **No i18n** — architecture ready but en/ru translations not extracted
+- **i18n ready** — `src/lib/i18n.ts` en/ru, locale toggle in header (App.tsx:22)

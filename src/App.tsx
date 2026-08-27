@@ -6,6 +6,7 @@ import { InputPanel } from "@/components/InputPanel/InputPanel";
 import { InspectorPanel } from "@/components/InspectorPanel/InspectorPanel";
 import { PreviewDock } from "@/components/PreviewDock/PreviewDock";
 import { useAppStore } from "@/store/useAppStore";
+import { t } from "@/lib/i18n";
 
 /**
  * Этап 2: shell + Command Palette (⌘K) + сквозной data-поток
@@ -16,6 +17,8 @@ import { useAppStore } from "@/store/useAppStore";
  */
 export function App() {
   const theme = useAppStore((s) => s.theme);
+  const locale = useAppStore((s) => s.locale);
+  const setLocale = useAppStore((s) => s.setLocale);
   const nodes = useAppStore((s) => s.nodes);
   const selectedNodeId = useAppStore((s) => s.selectedNodeId);
   const openPalette = useAppStore((s) => s.openPalette);
@@ -67,9 +70,16 @@ export function App() {
     <div className="flex h-screen w-screen flex-col bg-surface-0 text-text-primary">
       <div
         data-tauri-drag-region
-        className="flex h-9 shrink-0 items-center justify-center border-b border-border-subtle text-2xs text-text-muted"
+        className="flex h-9 shrink-0 items-center justify-between border-b border-border-subtle px-3 text-2xs text-text-muted"
       >
-        HexForge
+        <span>HexForge</span>
+        <button
+          onClick={() => setLocale(locale === "en" ? "ru" : "en")}
+          className="rounded border border-border-subtle px-2 py-0.5 text-2xs"
+          aria-label="toggle locale"
+        >
+          {locale.toUpperCase()}
+        </button>
       </div>
 
       <main className="flex flex-1 items-start justify-center overflow-y-auto p-6">
@@ -79,11 +89,11 @@ export function App() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm text-text-secondary">
                 {nodeCount === 0
-                  ? "Пустой граф — начните с ⌘K"
-                  : `${nodeCount} node(s)`}
+                  ? t(locale, "app.emptyGraph")
+                  : t(locale, "app.nodes", { count: nodeCount })}
                 {selectedNode && (
                   <span className="ml-2 font-mono text-xs text-text-muted">
-                    selected: {selectedNode.operationId}
+                    {t(locale, "app.selected", { id: selectedNode.operationId })}
                   </span>
                 )}
               </div>
@@ -96,7 +106,7 @@ export function App() {
                     "hover:border-border-focus hover:text-accent",
                   ].join(" ")}
                 >
-                  Add operation
+                  {t(locale, "app.addOperation")}
                   <kbd className="ml-2 rounded-sm border border-border-subtle bg-surface-2 px-1.5 py-0.5 text-2xs">
                     ⌘K
                   </kbd>
@@ -110,7 +120,7 @@ export function App() {
                       "hover:border-status-error hover:text-text-primary",
                     ].join(" ")}
                   >
-                    Cancel
+                    {t(locale, "app.cancel")}
                   </button>
                 )}
                 <button
@@ -123,7 +133,7 @@ export function App() {
                     "disabled:cursor-not-allowed disabled:opacity-50",
                   ].join(" ")}
                 >
-                  {runningNodeId ? "Running…" : "Run node"}
+                  {runningNodeId ? t(locale, "app.running") : t(locale, "app.runNode")}
                 </button>
               </div>
             </div>
@@ -148,10 +158,10 @@ export function App() {
       </main>
 
       <div className="flex h-6 shrink-0 items-center justify-between border-t border-border-subtle px-3 text-2xs text-text-muted">
-        <span>HexForge v0.1.0 — Node Graph MVP</span>
+        <span>{t(locale, "app.version")}</span>
         <span className="flex gap-4">
-          <span>{sourceHandle ? "source ready" : "no source"}</span>
-          <span>{snapshots.length} snapshot(s)</span>
+          <span>{sourceHandle ? t(locale, "app.sourceReady") : t(locale, "app.noSource")}</span>
+          <span>{t(locale, "app.snapshots", { count: snapshots.length })}</span>
         </span>
       </div>
 

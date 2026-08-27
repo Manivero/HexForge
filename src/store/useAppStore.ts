@@ -32,12 +32,16 @@ import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 import { hexPairsToBytes } from "@/lib/bytes";
 import { findRootId } from "@/lib/graphWalk";
 import { removeNode } from "@/lib/graphMutate";
+import { t } from "@/lib/i18n";
 
 export type Theme = "dark" | "light";
+export type Locale = "en" | "ru";
 
 interface UiSlice {
   theme: Theme;
   toggleTheme: () => void;
+  locale: Locale;
+  setLocale: (l: Locale) => void;
 }
 
 interface PaletteSlice {
@@ -168,6 +172,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   theme: "dark",
   toggleTheme: () =>
     set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
+  locale: "en",
+  setLocale: (l) => set({ locale: l }),
 
   // ---- palette ----
   isPaletteOpen: false,
@@ -334,7 +340,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   runSelectedNode: async () => {
     const nodeId = get().selectedNodeId;
     if (!nodeId) {
-      set({ runError: "Выберите узел для запуска (⌘K → операция)" });
+      set({ runError: t(get().locale, "app.selectNodeForRun") });
       return;
     }
     set({ runningNodeId: nodeId, runError: null });
