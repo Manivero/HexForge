@@ -183,8 +183,8 @@ npm run build       # tsc --noEmit + vite build
 
 | Priority | Item |
 |----------|------|
-| Next | Parallel pipeline tuning (64 MB chunks per FR-5.2) |
 | Next | Native performance profiling (NFR-1 <16 ms) |
+| Next | i18n extraction (en/ru) |
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
 | Near | Import CyberChef recipes |
 | Future | Diff between snapshots (FR-4.3) |
@@ -227,6 +227,6 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
-- **Parallel streaming pipeline** — fusion + bounded channels (4×1MiB) implemented; 64 MB FR-5.2 tuning pending
-- **64 MB chunks not implemented** — default chunk size is 1 MiB (FR-5.2 target not met)
+- **Parallel streaming pipeline** — fusion + bounded channels (4×64 MiB = 256 MiB per stage) implemented per FR-5.2
+- **64 MB chunks implemented** — `DEFAULT_CHUNK_SIZE_BYTES = 64 MiB` for file I/O and `apply_chunk`
 - **No i18n** — architecture ready but en/ru translations not extracted
