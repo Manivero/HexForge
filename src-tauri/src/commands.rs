@@ -664,6 +664,81 @@ fn import_recipe_inner(state: &AppState, req: ImportRecipeRequest) -> HexForgeRe
     })
 }
 
+#[derive(Debug, Deserialize)]
+struct CyberChefOp {
+    op: String,
+    args: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCyberChefRecipeRequest {
+    pub source_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportCyberChefRecipeResponse {
+    pub graph: GraphDto,
+    pub unmapped_operations: Vec<UnmappedOp>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnmappedOp {
+    pub cyber_chef_id: String,
+    pub reason: String,
+}
+
+fn map_cyberchef_op(op: &str, _args: &[serde_json::Value]) -> Option<(String, serde_json::Value)> {
+    match op {
+        "To Base64" => Some(("encoding.base64.encode".into(), serde_json::json!({}))),
+        "From Base64" => Some(("encoding.base64.decode".into(), serde_json::json!({}))),
+        "To Hex" => Some(("encoding.hex.encode".into(), serde_json::json!({}))),
+        "From Hex" => Some(("encoding.hex.decode".into(), serde_json::json!({}))),
+        "To Base32" => Some(("encoding.base32.encode".into(), serde_json::json!({}))),
+        "From Base32" => Some(("encoding.base32.decode".into(), serde_json::json!({}))),
+        "ROT13" => Some(("text.rot13".into(), serde_json::json!({}))),
+        "Reverse" => Some(("text.reverse".into(), serde_json::json!({}))),
+        "URL Encode" => Some(("network.url_encode".into(), serde_json::json!({}))),
+        "URL Decode" => Some(("network.url_decode".into(), serde_json::json!({}))),
+        "Gzip Compress" => Some(("compression.gzip.compress".into(), serde_json::json!({}))),
+        "Gzip Decompress" => Some(("compression.gzip.decompress".into(), serde_json::json!({}))),
+        "Zlib Deflate" => Some(("compression.zlib.compress".into(), serde_json::json!({}))),
+        "Zlib Inflate" => Some(("compression.zlib.decompress".into(), serde_json::json!({}))),
+        "XOR" => {
+            let key = _args.first().and_then(|v| v.as_str()).unwrap_or("key");
+            Some(("crypto.xor".into(), serde_json::json!({"key": key})))
+        }
+        _ => None,
+    }
+}
+
+#[tauri::command]
+pub fn import_cyberchef_recipe(req: ImportCyberChefRecipeRequest, _state: State<Arc<AppState>>) -> HexForgeResult<ImportCyberChefRecipeResponse> {
+    validate_fs_path(&req.source_path, "sourcePath")?;
+    let text = std::fs::read_to_string(&req.source_path).map_err(|e| HexForgeError::invalid_input(format!("cannot read '{}': {e}", req.source_path)))?;
+    let ops: Vec<CyberChefOp> = serde_json::from_str(&text).map_err(|e| HexForgeError::invalid_input(format!("'{}' is not a valid CyberChef recipe: {e}", req.source_path)))?;
+    let mut nodes: std::collections::HashMap<String, hexforge_engine::graph_dto::OperationNodeDto> = std::collections::HashMap::new();
+    let mut unmapped = Vec::new();
+    let mut prev_id: Option<String> = None;
+    for op in ops {
+        if let Some((hex_id, params)) = map_cyberchef_op(&op.op, &op.args) {
+            let id = Uuid::new_v4().to_string();
+            let inputs = prev_id.clone().into_iter().collect();
+            nodes.insert(id.clone(), hexforge_engine::graph_dto::OperationNodeDto { id: id.clone(), operation_id: hex_id, operation_version: "1.0.0".into(), params, inputs });
+            prev_id = Some(id);
+        } else {
+            unmapped.push(UnmappedOp { cyber_chef_id: op.op.clone(), reason: "no HexForge equivalent".into() });
+        }
+    }
+    // Validate resulting graph is DAG (linear chain always is, but check)
+    let graph = GraphDto { nodes: nodes.clone() };
+    let g: Graph = graph.clone().try_into()?;
+    g.topo_order().map_err(HexForgeError::from)?;
+    Ok(ImportCyberChefRecipeResponse { graph, unmapped_operations: unmapped })
+}
+
 // ---------- History ----------
 
 #[derive(Debug, Serialize)]

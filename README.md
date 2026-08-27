@@ -185,9 +185,9 @@ npm run build       # tsc --noEmit + vite build
 | Priority | Item |
 |----------|------|
 | Next | Native performance profiling (NFR-1 <16 ms) |
-| Next | i18n extraction (en/ru) |
+| Done | i18n en/ru — `src/lib/i18n.ts` + locale toggle |
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
-| Near | Import CyberChef recipes |
+| Done | Import CyberChef recipes — `import_cyberchef_recipe` |
 | Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
 | Done | Diff between snapshots (FR-4.3) — `diff_snapshots` |
 | Future | Crypto GCM modes, additional ciphers |

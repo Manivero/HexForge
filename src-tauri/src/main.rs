@@ -35,6 +35,7 @@ fn main() {
             commands::jump_to_snapshot,
             commands::list_snapshots,
             commands::diff_snapshots,
+            commands::import_cyberchef_recipe,
             commands::list_plugins,
         ])
         .run(tauri::generate_context!())

@@ -15,6 +15,7 @@
 //                    setGraph (+ эмит graph://invalidated со staleNodeIds),
 //                    cancelNode (кооперативная отмена, kind="Cancelled"),
 //                    listSnapshots, diffSnapshots, exportRecipe, importRecipe,
+//                    importCyberChefRecipe (mapping To Base64/From Base64/To Hex/ROT13/XOR/URL/Gzip/Zlib),
 //                    jumpToSnapshot (lineage-реплей из корневого источника,
 //                    перенос головы истории),
 //                    listPlugins (заглушка до hexforge-plugin-host)
