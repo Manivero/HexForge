@@ -1,6 +1,7 @@
 pub mod ip;
 pub mod jwt;
 pub mod pcap;
+pub mod pcap_parse;
 pub mod url;
 pub mod url_parse;
 pub mod user_agent;

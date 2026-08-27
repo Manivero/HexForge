@@ -67,6 +67,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `url_parse` | URL parse to JSON |
 | `jwt_decode` | JWT header/payload decode (base64url) |
 | `pcap_info` | PCAP global/packet header summary |
+| `pcap_parse` | PCAP L2-L4 parse (Ethernet/IP/TCP) |
 | `user_agent_parse` | User-Agent browser/OS/device |
 | `ip_parse` | IP parse (v4/v6, private/loopback) |
 
