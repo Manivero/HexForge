@@ -1,5 +1,5 @@
 //! `compression.*` — сжатие/разжатие (PRD §3.3 Compression).
-//! gzip/zlib/deflate через `flate2`, bzip2 через `bzip2` (RFC 1952/1950/8478).
+//! gzip/zlib/deflate via `flate2`, bzip2 via `bzip2`, lzma/xz via `xz2`.
 
 use bzip2::read::{BzDecoder, BzEncoder};
 use bzip2::Compression as BzCompression;
@@ -8,6 +8,7 @@ use flate2::Compression;
 use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
 use std::borrow::Cow;
 use std::io::Read;
+use xz2::read::{XzDecoder, XzEncoder};
 
 // ---------- helpers ----------
 
@@ -341,6 +342,63 @@ impl Transform for Bzip2Decompress {
     }
 }
 
+pub struct LzmaCompress;
+
+impl Transform for LzmaCompress {
+    fn id(&self) -> &'static str {
+        "compression.lzma.compress"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "LZMA Compress"
+    }
+    fn category(&self) -> &'static str {
+        "Compression"
+    }
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "level": { "type": "integer", "minimum": 0, "maximum": 9, "default": 6 }
+            }
+        })
+    }
+    fn capabilities(&self) -> TransformCapabilities {
+        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+    }
+    fn apply<'a>(&self, input: ByteView<'a>, params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+        let lvl = params.get("level").and_then(|v| v.as_u64()).unwrap_or(6).clamp(0, 9) as u32;
+        let mut enc = XzEncoder::new(input.as_ref(), lvl);
+        Ok(Cow::Owned(compress_bytes(&mut enc)?))
+    }
+}
+
+pub struct LzmaDecompress;
+
+impl Transform for LzmaDecompress {
+    fn id(&self) -> &'static str {
+        "compression.lzma.decompress"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "LZMA Decompress"
+    }
+    fn category(&self) -> &'static str {
+        "Compression"
+    }
+    fn capabilities(&self) -> TransformCapabilities {
+        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+    }
+    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+        let mut dec = XzDecoder::new(input.as_ref());
+        Ok(Cow::Owned(decompress_bytes(&mut dec)?))
+    }
+}
+
 inventory::submit! { crate::TransformEntry(&GzipCompress) }
 inventory::submit! { crate::TransformEntry(&GzipDecompress) }
 inventory::submit! { crate::TransformEntry(&ZlibCompress) }
@@ -349,6 +407,8 @@ inventory::submit! { crate::TransformEntry(&DeflateCompress) }
 inventory::submit! { crate::TransformEntry(&DeflateDecompress) }
 inventory::submit! { crate::TransformEntry(&Bzip2Compress) }
 inventory::submit! { crate::TransformEntry(&Bzip2Decompress) }
+inventory::submit! { crate::TransformEntry(&LzmaCompress) }
+inventory::submit! { crate::TransformEntry(&LzmaDecompress) }
 
 #[cfg(test)]
 mod tests {
@@ -415,5 +475,13 @@ mod tests {
         roundtrip(&Bzip2Compress, &Bzip2Decompress, b"");
         let big = vec![b'X'; 50_000];
         roundtrip(&Bzip2Compress, &Bzip2Decompress, &big);
+    }
+
+    #[test]
+    fn lzma_roundtrip() {
+        roundtrip(&LzmaCompress, &LzmaDecompress, b"lzma payload test for HexForge");
+        roundtrip(&LzmaCompress, &LzmaDecompress, b"");
+        let big = vec![b'Y'; 50_000];
+        roundtrip(&LzmaCompress, &LzmaDecompress, &big);
     }
 }

@@ -77,6 +77,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `zlib.compress` / `zlib.decompress` | Zlib (RFC 1950) via flate2 |
 | `deflate.compress` / `deflate.decompress` | Raw Deflate (RFC 1951) via flate2 |
 | `bzip2.compress` / `bzip2.decompress` | Bzip2 via bzip2 crate |
+| `lzma.compress` / `lzma.decompress` | LZMA/XZ via xz2 |
 
 ### Streaming
 | Operation | Description |
@@ -172,8 +173,8 @@ npm run build       # tsc --noEmit + vite build
 
 | Priority | Item |
 |----------|------|
-| Next | Bzip2 / LZMA compression (PRD §3.3) |
 | Next | Parallel pipeline tuning (64 MB chunks per FR-5.2) |
+| Next | Native performance profiling (NFR-1 <16 ms) |
 | Near | Plugin host (Wasmtime sandbox, signed plugins) |
 | Near | Import CyberChef recipes |
 | Future | Diff between snapshots (FR-4.3) |
@@ -211,7 +212,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 
 ## Known Limitations
 
-- **LZMA not yet implemented** — gzip/zlib/deflate/bzip2 done; lzma pending
+- **Compression fully implemented** — gzip/zlib/deflate/bzip2/lzma done
 - **Plugin system not implemented** — Wasmtime host is designed but not built
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
