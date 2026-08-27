@@ -55,7 +55,9 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `xor` | Byte-wise XOR with cycling UTF-8 key |
 | `rc4` | RC4 stream cipher (hexKey support) |
 | `aes.encrypt` / `aes.decrypt` | AES-128/192/256 ECB/CBC (PKCS7, hex key/iv) |
+| `aes_gcm.encrypt` / `aes_gcm.decrypt` | AES-GCM AEAD (128/256, nonce/AAD) |
 | `chacha20` | ChaCha20 stream cipher (hex key/nonce) |
+| `chacha20_poly1305.encrypt` / `decrypt` | ChaCha20-Poly1305 AEAD |
 
 ### Network
 | Operation | Description |
@@ -126,7 +128,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (142 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (157 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + stub Wasmtime host (FR-6) |
@@ -194,7 +196,7 @@ npm run build       # tsc --noEmit + vite build
 | Done | Import CyberChef recipes — `import_cyberchef_recipe` |
 | Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
 | Done | Diff between snapshots (FR-4.3) — `diff_snapshots` |
-| Future | Crypto GCM modes, additional ciphers |
+| Done | Crypto AEAD — AES-GCM (128/256) + ChaCha20-Poly1305 |
 | Deferred | Real-time collaboration, cloud sync, mobile clients |
 
 See [PRD §3](docs/01-PRD.md) for full requirements and [docs/07](docs/07-PROJECT-SCAFFOLD.md) for current implementation status.
