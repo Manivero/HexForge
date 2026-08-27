@@ -25,6 +25,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Operation | Description |
 |-----------|-------------|
 | `base32.encode` / `base32.decode` | RFC 4648 Base32 |
+| `base58.encode` / `base58.decode` | Bitcoin Base58 |
 | `base64.encode` / `base64.decode` | Standard / URL-safe Base64 |
 | `hex.encode` / `hex.decode` | Hexadecimal encoding |
 | `protobuf.decode_raw` | Raw Protobuf wire-format walk |
@@ -35,7 +36,10 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `blake3` | BLAKE3 cryptographic hash (256-bit) |
 | `crc32` | IEEE CRC-32 checksum |
 | `md5` | MD5 hash |
+| `sha1` | SHA-1 hash |
 | `sha256` | SHA-256 hash |
+| `sha512` | SHA-512 hash |
+| `sha3_256` | SHA3-256 hash |
 
 ### Cryptography
 | Operation | Description |
@@ -200,7 +204,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **Bzip2/LZMA not yet implemented** — gzip/zlib/deflate done via flate2; bzip2/lzma pending
 - **Plugin system not implemented** — Wasmtime host is designed but not built
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
-- **previewOnly flag ignored** — downstream recalculation never happens (single-node execution only)
+- **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
 - **Parallel streaming pipeline** — fusion + bounded channels (4×1MiB) implemented; 64 MB FR-5.2 tuning pending
 - **64 MB chunks not implemented** — default chunk size is 1 MiB (FR-5.2 target not met)
