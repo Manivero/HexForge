@@ -181,6 +181,9 @@ cargo test --workspace
 # Static analysis
 cargo clippy --workspace --all-targets
 
+# Benchmarks (NFR-1)
+cargo bench -p hexforge-stream -- --verbose
+
 # Frontend lint + type check + build
 npm run lint
 npm run test:fe     # Unit tests (node:test, zero deps)
@@ -191,7 +194,7 @@ npm run build       # tsc --noEmit + vite build
 
 | Priority | Item |
 |----------|------|
-| Next | Native performance profiling (NFR-1 <16 ms) |
+| Done | Native performance profiling — `cargo bench -p hexforge-stream` criterion |
 | Done | i18n en/ru — `src/lib/i18n.ts` + locale toggle |
 | Near | Plugin host — stub `hexforge-plugin-host` Ed25519 verify, Wasmtime next |
 | Done | Import CyberChef recipes — `import_cyberchef_recipe` |
@@ -207,11 +210,12 @@ See [PRD §3](docs/01-PRD.md) for full requirements and [docs/07](docs/07-PROJEC
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Ensure all checks pass:
-   ```bash
-   cargo clippy --workspace --all-targets -- -D warnings
-   cargo test --workspace
-   npm run lint && npm run test:fe && npm run build
-   ```
+    ```bash
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace
+    cargo bench -p hexforge-stream --no-run
+    npm run lint && npm run test:fe && npm run build
+    ```
 4. Commit with a descriptive message following [Conventional Commits](https://www.conventionalcommits.org/)
 5. Open a pull request
 
