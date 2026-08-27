@@ -5,7 +5,6 @@
 //! NOTE: Full Wasmtime integration is a work in progress. The core
 //! signature verification and manifest parsing are functional.
 //! Full Wasmtime execution will be completed in the next iteration.
-
 #![allow(dead_code, unused_imports, unused_variables)]
 
 use anyhow::{Context, Result, anyhow};
@@ -50,50 +49,10 @@ pub struct PluginInstance {
     pub signature_hex: String,
 }
 
-/// WasiCtx with capability-based access control
-#[derive(Default)]
-struct CapabilityContext {
-    allowed_fs_read: bool,
-    allowed_fs_write: bool,
-    allowed_network: bool,
-    allowed_paths: Vec<std::path::PathBuf>,
-}
-
-impl CapabilityContext {
-    fn from_granted(granted: &[String]) -> Self {
-        Self {
-            allowed_fs_read: granted.iter().any(|c| c == "filesystem_read"),
-            allowed_fs_write: granted.iter().any(|c| c == "filesystem_write"),
-            allowed_network: granted.iter().any(|c| c == "network"),
-            allowed_paths: Vec::new(),
-        }
-    }
-
-    fn check_fs_read(&self, _path: &Path) -> Result<()> {
-        if !self.allowed_fs_read {
-            return Err(anyhow!("filesystem_read capability denied"));
-        }
-        Ok(())
-    }
-
-    fn check_fs_write(&self, _path: &Path) -> Result<()> {
-        if !self.allowed_fs_write {
-            return Err(anyhow!("filesystem_write capability denied"));
-        }
-        Ok(())
-    }
-
-    fn check_network(&self) -> Result<()> {
-        if !self.allowed_network {
-            return Err(anyhow!("network capability denied"));
-        }
-        Ok(())
-    }
-}
-
 /// WASM Plugin Runtime with fuel metering and capability sandbox
-/// NOTE: Full Wasmtime execution is a work in progress.
-/// Current implementation provides signature verification and manifest parsing.
+/// NOTE: Full Wasmtime integration is a work in progress. The core
+/// signature verification and manifest parsing are functional.
+/// Full Wasmtime execution will be completed in the next iteration.
 pub struct PluginRuntime {
     fuel_limit: u64,
 }
@@ -169,7 +128,7 @@ pub fn verify_signature(manifest_bytes: &[u8], signature_hex: &str, pubkey_hex: 
 }
 
 /// Stub list_plugins — returns empty until WASM host is fully wired (FR-6.1).
-pub fn list_plugins_stub() -> Vec<PluginManifest> {
+pub fn list_plugins_stub() -> Vec<PluginInstance> {
     Vec::new()
 }
 
