@@ -64,6 +64,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `html_encode` / `html_decode` | HTML entities (named + numeric) |
 | `regex_extract` | Regex extract matches (one per line) |
 | `regex_replace` | Regex replace with captures ($1) |
+| `unicode_normalize` | Unicode NFC/NFD/NFKC/NFKD |
 | `reverse` | Byte-level reversal |
 | `rot13` | ROT13 substitution |
 
@@ -73,6 +74,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `gzip.compress` / `gzip.decompress` | Gzip (RFC 1952) via flate2 |
 | `zlib.compress` / `zlib.decompress` | Zlib (RFC 1950) via flate2 |
 | `deflate.compress` / `deflate.decompress` | Raw Deflate (RFC 1951) via flate2 |
+| `bzip2.compress` / `bzip2.decompress` | Bzip2 via bzip2 crate |
 
 ### Streaming
 | Operation | Description |
@@ -207,7 +209,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 
 ## Known Limitations
 
-- **Bzip2/LZMA not yet implemented** — gzip/zlib/deflate done via flate2; bzip2/lzma pending
+- **LZMA not yet implemented** — gzip/zlib/deflate/bzip2 done; lzma pending
 - **Plugin system not implemented** — Wasmtime host is designed but not built
 - **Mapped sources are read-only** — file-backed sources cannot be patched in place
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending

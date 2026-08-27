@@ -1,8 +1,8 @@
 //! `compression.*` — сжатие/разжатие (PRD §3.3 Compression).
-//! MVP: gzip и zlib/deflate через `flate2` (RFC 1952 / RFC 1950).
-//! Расширение до bzip2/lzma — следующий шаг по Roadmap (добавить crate
-//! `bzip2`/`lzma-rust` без изменения ядра, только новые `Transform`).
+//! gzip/zlib/deflate через `flate2`, bzip2 через `bzip2` (RFC 1952/1950/8478).
 
+use bzip2::read::{BzDecoder, BzEncoder};
+use bzip2::Compression as BzCompression;
 use flate2::read::{DeflateDecoder, DeflateEncoder, GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
 use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
@@ -266,12 +266,89 @@ impl Transform for DeflateDecompress {
     }
 }
 
+pub struct Bzip2Compress;
+
+impl Transform for Bzip2Compress {
+    fn id(&self) -> &'static str {
+        "compression.bzip2.compress"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "Bzip2 Compress"
+    }
+    fn category(&self) -> &'static str {
+        "Compression"
+    }
+    fn params_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "level": { "type": "integer", "minimum": 1, "maximum": 9, "default": 6 }
+            }
+        })
+    }
+    fn capabilities(&self) -> TransformCapabilities {
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
+    }
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
+        let lvl = params.get("level").and_then(|v| v.as_u64()).unwrap_or(6).clamp(1, 9) as u32;
+        let mut enc = BzEncoder::new(input.as_ref(), BzCompression::new(lvl));
+        Ok(Cow::Owned(compress_bytes(&mut enc)?))
+    }
+}
+
+pub struct Bzip2Decompress;
+
+impl Transform for Bzip2Decompress {
+    fn id(&self) -> &'static str {
+        "compression.bzip2.decompress"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn display_name(&self) -> &'static str {
+        "Bzip2 Decompress"
+    }
+    fn category(&self) -> &'static str {
+        "Compression"
+    }
+    fn capabilities(&self) -> TransformCapabilities {
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
+    }
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
+        let mut dec = BzDecoder::new(input.as_ref());
+        Ok(Cow::Owned(decompress_bytes(&mut dec)?))
+    }
+}
+
 inventory::submit! { crate::TransformEntry(&GzipCompress) }
 inventory::submit! { crate::TransformEntry(&GzipDecompress) }
 inventory::submit! { crate::TransformEntry(&ZlibCompress) }
 inventory::submit! { crate::TransformEntry(&ZlibDecompress) }
 inventory::submit! { crate::TransformEntry(&DeflateCompress) }
 inventory::submit! { crate::TransformEntry(&DeflateDecompress) }
+inventory::submit! { crate::TransformEntry(&Bzip2Compress) }
+inventory::submit! { crate::TransformEntry(&Bzip2Decompress) }
 
 #[cfg(test)]
 mod tests {
@@ -330,5 +407,13 @@ mod tests {
             let dec = GzipDecompress.apply(enc, &serde_json::json!({}), &ctx).unwrap();
             assert_eq!(dec.as_ref(), b"level test");
         }
+    }
+
+    #[test]
+    fn bzip2_roundtrip() {
+        roundtrip(&Bzip2Compress, &Bzip2Decompress, b"bzip2 payload test");
+        roundtrip(&Bzip2Compress, &Bzip2Decompress, b"");
+        let big = vec![b'X'; 50_000];
+        roundtrip(&Bzip2Compress, &Bzip2Decompress, &big);
     }
 }
