@@ -45,28 +45,36 @@ hexforge/
         └── CommandPalette/{CommandPalette.tsx,commands.ts}
 ```
 
-## Реализовано и верифицировано в этом срезе (Этап 2, шаг 1)
+## Реализовано и верифицировано (актуальный срез, 2026-08)
 
 | Компонент | Статус | Верификация |
 |---|---|---|
-| `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort, cycle detection, fork/merge, lineage + защита от parent-циклов, порядок записи истории) |
-| `hexforge-ops` (Base64, Hex, ROT13, MD5, SHA-256) | ✅ | `cargo test -p hexforge-ops` — 7 тестов (roundtrip, известные векторы, невалидный вход) |
-| React + TS strict фронтенд | ✅ | `tsc --noEmit` — 0 ошибок; `vite build` — успешный production-бандл |
-| ESLint | ✅ | `eslint . --ext ts,tsx --max-warnings 0` — 0 замечаний (`require()` в tailwind.config.ts заменён на ESM-import) |
-| Tauri command `greet` + полный IPC-слой (11 команд) | ✅ | `cargo build --workspace` проходит; иконки сгенерированы через `npx tauri icon` в `src-tauri/icons/` |
-| Command Palette (⌘K) | ✅ | Собран и работает в рамках `vite build`; связан с `list_operations`/`greet` через типизированный `src/lib/ipc.ts` |
-| Time-Travel запись истории | ✅ | `run_node` пишет Snapshot (blake3 content-hash входа/выхода) за каждый выполненный узел; `list_snapshots` возвращает реальный журнал; 22 unit-теста командного слоя/состояния зелёные |
-| Операции PRD §3.3 (дополнение): encoding.base32 (RFC 4648), hashing.crc32 (IEEE), text.html_encode/html_decode (named+numeric entities) | ✅ | RFC-векторы; CRC32 эталон 123456789→cbf43926; roundtrip UTF-8; unknown entity passthrough |
-| Text ops: text.case_transform (upper/lower/title), text.reverse | ✅ | чистый std; тесты на все режимы и passthrough |
-| Binary Analysis: binary.strings_extract (аналог strings(1), min_length) + binary.entropy (Shannon, 0–8 бит/байт) | ✅ | для Malware Analyst / DFIR; тесты на uniform/maximal/text-vs-binary entropy |
-| Операции PRD §3.3: crypto.xor (UTF-8 ключ циклом), network.url_encode/url_decode (RFC 3986), streaming.concat | ✅ | inventory-регистрация без правок ядра; юнит-тесты на каждый (векторы, involution, roundtrip, ошибки ключа/hex) |
-| Граф: удаление узла с мостом детей к родителю + Clear Graph | ✅ | lib/graphMutate removeNode — чистые мутации + FE-тесты; set_graph синхронизирует |
-| PreviewDock: постраничный HexViewer (4КБ-страницы, ◀▶/offset, ASCII) + патч региона (hex-пары ≤ страницы) | ✅ | preview_bytes + patch_source (перезапись InMemory в границах, Mapped read-only); golden ×2 |
-| Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | preview_bytes offset/length из контракта; рендер проверен headless-браузером |
-| Первый data-flow UI (InputPanel → Run node → PreviewDock) | ✅ | Поток 05-IPC §3: литерал → create_literal_source → debounced set_graph → run_node → preview_bytes; рендер проверен headless-браузером на vite dev (0 ошибок консоли, мягкая деградация без бэкенда); сквозной прогон с реальным invoke — за `npm run tauri dev` |
-| GraphCanvas (вертикальный срез DAG) | ✅ | Рельс + карточки узлов в BFS-порядке от корней, выбор кликом, маркер sourceHandle у корня; раскладка — чистая функция от nodes (замена на полноценный layout без смены API); boot smoke-test нативного бинаря: `[hexforge-core] initialized with 7 operations` |
-| InspectorPanel (FR-3.2) | ✅ | Авто-форма из paramsSchema (string+enum → select, boolean → checkbox, integer/number → number, string → text); onChange → updateNodeParams → debounced set_graph; stale-бейдж превью при мутации графа после запуска (видимая часть FR-1.6) |
-| hexforge-stream MVP (планировщик) | ✅ | Новый крейт chunk-примитивов + `hexforge-engine (scheduler::execute_chain/replay_snapshot)`: chunked `apply_chunk` для streamable-операций (Hex/Rot13, состояние-перенос ниббла у HexDecode), memoization LRU по reproducibility_key (Arc<Vec<u8>>, 256MB), кооперативная отмена (`cancel_node` → kind="Cancelled", чекпоинты между узлами/чанками), merge через `MergeTransform` + операция `streaming.concat` (PRD FR-1.4); 11 тестов планировщика |
+| `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort O(V+E), cycle, fork/merge, lineage + parent-cycle guard, order) |
+| `hexforge-ops` — 42 операции | ✅ | `cargo test -p hexforge-ops` — 142 теста (см. ниже); `clippy -D warnings` 0 |
+| Encoding | ✅ | base32 RFC4648, base58 Bitcoin, base64 std/url_safe, hex (streamable), quoted_printable RFC2045, json pretty/minify, xml pretty (quick-xml), msgpack (rmp-serde), protobuf raw walk — roundtrip + invalid input |
+| Hashing | ✅ | blake3, blake2b/s, crc32 IEEE (cbf43926), md5, sha1/sha256/sha512, sha3_256 — known vectors |
+| Compression | ✅ | gzip/zlib/deflate (flate2), bzip2 (bzip2), lzma/xz (xz2) — roundtrip + level param, large 50k |
+| Text | ✅ | case_transform, html encode/decode, regex_extract/replace (regex 1), reverse, rot13, unicode_normalize (nfc/nfd/nfkc/nfkd) |
+| Network | ✅ | url_encode/decode RFC3986, url_parse (url crate), jwt_decode (base64url), pcap_info (manual pcap header) |
+| Crypto | ✅ | rot_n, xor (UTF-8 key), rc4 (hexKey), aes-128/192/256 ecb/cbc PKCS7 (aes+cbc+ecb), chacha20 (32B key/12B nonce) — NIST ECB vector, involution |
+| Streaming | ✅ | concat (MergeTransform), diff (2-input byte diff) |
+| Binary Analysis | ✅ | strings_extract, entropy, elf_info/pe_info (goblin), magic (infer) — reject non-elf/pe, PNG mime |
+| Auto/Magic Wand | ✅ | encoding.auto_decode (base64/hex heuristic) |
+| React + TS strict | ✅ | `tsc --noEmit` 0, `vite build` 252kB gzip 81kB, `eslint --max-warnings 0` 0 |
+| i18n en/ru | ✅ | `src/lib/i18n.ts` 11 ключей, `useAppStore.locale` + toggle в `App.tsx:34`, `t(locale,key)` |
+| Tauri IPC (15 команд) | ✅ | `cargo test -p hexforge` 22 golden-теста (wire format, sort_for_palette, graphDto, export/import, cancel, progress, invalidated) |
+| Command Palette (⌘K) | ✅ | `vite build` + `fuzzyMatch.ts` 40 FE-тестов |
+| Time-Travel | ✅ | `run_node` пишет Snapshot per node, `list_snapshots` ordered, `jump_to_snapshot` replay+fork, `diff_snapshots` FR-4.3 unified diff |
+| Graph | ✅ | `removeNode` bridge + `clearGraph`, `compute_invalidated` downstream, `graphWalk` BFS + cycle guard — FE tests 40 |
+| PreviewDock | ✅ | HexViewer 4KB pages, patch_source InMemory (Mapped RO), `preview_bytes` base64Chunk |
+| Data-flow UI | ✅ | InputPanel → create_literal_source (16MB limit) → debounced set_graph → run_node → preview_bytes → PreviewDock |
+| GraphCanvas | ✅ | BFS layout, selection, sourceHandle marker |
+| InspectorPanel | ✅ | Auto-form from paramsSchema, stale badge FR-1.6 |
+| hexforge-stream + engine | ✅ | `DEFAULT_CHUNK_SIZE_BYTES = 64 MiB` FR-5.2, fusion + parallel pipeline (stages×4×64MiB), `reproducibility_key` LRU (true LRU, 256MB), `cancel_node` Cancelled, `MergeTransform` |
+| CLI | ✅ | `hexforge-cli run/validate` — `validate_graph` + DAG + version check, 4 tests + progress eprintln |
+| Import | ✅ | `import_recipe` + `import_cyberchef_recipe` (To Base64/From Base64/To Hex/ROT13/XOR/URL/Gzip/Zlib mapping, unmapped list) |
+| .env.example + .gitignore | ✅ | `*.out` + `!.env.example`, `.env` ignored, secrets scan 0 |
+| Chunk 64 MiB (FR-5.2) | ✅ | `hexforge-stream:23` 64 MiB, parallel threshold = 64 MiB, engine tests with 64M vectors (24s) |
 
 ## Как запустить локально
 
@@ -107,38 +115,9 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 150/150 зелёных (Rust) + 40 FE-юнитов
-(core 9, ops 77, stream 7, engine 31, tauri 22, cli 4 — включая IPC-parity golden-тесты,
-планировщик, lineage-реплей, форк истории, fusion и ПАРАЛЛЕЛЬНЫЙ конвейер),
-`tsc --noEmit` — 0 ошибок, `eslint` — 0 замечаний, `vite build` — успешная сборка,
-`npm run test:fe` — 14/14 (fuzzyMatch ⌘K + hex-viewer formatting).
-1. Планировщик MVP (крейт `hexforge-engine`): chunked `apply_chunk`
-   плюс FUSION стримового суффикса + параллельный конвейер
-   (стадия = поток, bounded sync_channel(4): память ≤ stages×4×1МиБ;
-   промежуточные выходы размером с чанк; кэшируется финальная стадия);
-   внутри, memoization по reproducibility_key,
-   кооперативная отмена (kind="Cancelled"), merge через MergeTransform
-   (`streaming.concat`, PRD FR-1.4). Cross-node pipelining, bounded
-   backpressure и 64 МБ-чанки FR-5.2 — следующий этап (docs/04 §6).
-   Не-стримовая `apply` непрерываема до возврата (операции не опрашивают
-   ctx.is_cancelled() внутри). `previewOnly` принимается, режимы пока
-   не различаются.
-2. `list_plugins`, `import_cyberchef_recipe` — контрактные заглушки.
-   Time-Travel реализован: `jump_to_snapshot` реплеит lineage от корневого
-   источника с верификацией content-hash'ей (источник изменён/освобождён →
-   InvalidInput; расхождение выхода → Internal, недетерминизм запрещён
-   FR-4.2) и переносит голову истории; HistoryPanel на фронте инициирует
-   прыжки; форк после прыжка покрыт тестом jump_then_new_run_forks_history_dag.
-   HistoryPanel рендерит дерево истории по parent-ссылкам (DFS, маркеры ветвления).
-3. Иконки приложения (`src-tauri/icons/*`) сгенерированы через
-   `npx tauri icon <source.png>`; для смены брендинга повторить команду с
-   новым исходником ≥ 1024×1024.
-4. CI (`.github/workflows/ci.yml`): frontend job (lint+build) и rust job
-   (cargo test/build на Windows). Linux-джобу для Tauri добавлять вместе с
-   системными зависимостями libwebkit2gtk; аудит зависимостей (`npm audit`,
-   `cargo audit`) — отдельным шагом при подключении NFR-4.
-5. UI-срез Этапа 2 покрывает линейную цепочку с одним литеральным источником;
-   History-панель и мультиисточники — следующие срезы по
-   03-INFORMATION-ARCHITECTURE.md. `package-lock.json` закоммичен — CI
-   использует `npm ci` (консистентность проверена `npm ci --dry-run`);
-   `npm audit` (prod+dev) — 0 уязвимостей на момент среза (NFR-4).
+Все изменения перепроверены: `cargo test --workspace` — 217 зелёных (Rust: core 9, ops 142, stream 7, engine 33, tauri 22, cli 4) + 40 FE (fuzz, bytes, graph, i18n) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 252kB, `npm run test:fe` 40.
+1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
+2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
+3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.
+4. CI (`.github/workflows/ci.yml`): frontend (lint+build) + rust (cargo test --workspace) на Windows; `npm ci` + `npm audit` 0 vulns, `cargo audit` — следующий.
+5. UI: linear chain + GraphCanvas BFS + Inspector auto-form + PreviewDock 4KB pages + patch_source; `i18n.ts` locale toggle; `package-lock.json` committed.
