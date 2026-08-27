@@ -48,6 +48,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 |-----------|-------------|
 | `rot_n` | ROT-N shift (0–25) |
 | `xor` | Byte-wise XOR with cycling UTF-8 key |
+| `rc4` | RC4 stream cipher (hexKey support) |
 
 ### Network
 | Operation | Description |
