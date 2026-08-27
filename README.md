@@ -236,7 +236,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 
 - **Compression fully implemented** — gzip/zlib/deflate/bzip2/lzma done
 - **Plugin host stub** — `hexforge-plugin-host` Ed25519 verify done, Wasmtime execution next
-- **Mapped sources are read-only** — file-backed sources cannot be patched in place
+- **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
 - **Parallel streaming pipeline** — fusion + bounded channels (4×64 MiB = 256 MiB per stage) implemented per FR-5.2

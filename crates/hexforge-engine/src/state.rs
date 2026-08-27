@@ -52,9 +52,10 @@ impl SourceStore {
         self.entries.remove(handle).is_some()
     }
 
-    /// Перезаписывает регион существующего InMemory-источника (FR Hex Editor).
-    /// Семантика MVP: только точная перезапись в границах — без роста,
-    /// без записи в Mapped (файлы на диске остаются read-only).
+    /// Перезаписывает регион источника (FR Hex Editor).
+    /// Семантика: точная перезапись в границах — без роста. Для InMemory — in-place.
+    /// Для Mapped (файл на диске) — copy-on-write: файл копируется в память
+    /// при первом патче, далее патчится как InMemory (FR-1.6, FR-5.1).
     pub fn write_region(
         &mut self,
         handle: &Uuid,
@@ -79,7 +80,23 @@ impl SourceStore {
                 buf[offset..end].copy_from_slice(data);
                 Ok(buf.len())
             }
-            SourceEntry::Mapped(_) => Err(WriteRegionError::ReadOnlyMapped),
+            SourceEntry::Mapped(mmap) => {
+                // Copy-on-write: materialize file bytes into InMemory
+                let mut buf = mmap[..].to_vec();
+                let end = offset.checked_add(data.len()).ok_or(
+                    WriteRegionError::OutOfBounds { size: buf.len(), required_end: usize::MAX },
+                )?;
+                if end > buf.len() {
+                    return Err(WriteRegionError::OutOfBounds {
+                        size: buf.len(),
+                        required_end: end,
+                    });
+                }
+                buf[offset..end].copy_from_slice(data);
+                let len = buf.len();
+                *entry = SourceEntry::InMemory(buf);
+                Ok(len)
+            }
         }
     }
 
@@ -404,6 +421,31 @@ mod tests {
             WriteRegionError::ReadOnlyMapped,
             WriteRegionError::UnknownHandle
         );
+    }
+
+    #[test]
+    fn write_region_cow_for_mapped() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("hexforge-test-mmap-{}.bin", Uuid::new_v4()));
+        {
+            let mut f = std::fs::File::create(&path).unwrap();
+            f.write_all(b"HELLO WORLD").unwrap();
+            f.sync_all().unwrap();
+        }
+        let file = std::fs::File::open(&path).unwrap();
+        let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+        let mut store = SourceStore::default();
+        let handle = Uuid::new_v4();
+        store.entries.insert(handle, SourceEntry::Mapped(mmap));
+        // Patch should succeed via COW
+        let new_len = store.write_region(&handle, 0, b"HI").unwrap();
+        assert_eq!(new_len, 11);
+        assert_eq!(store.get(&handle).unwrap().as_bytes()[..2], [b'H', b'I']);
+        // Second patch still works (now InMemory)
+        store.write_region(&handle, 2, b"!").unwrap();
+        assert_eq!(store.get(&handle).unwrap().as_bytes()[2], b'!');
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
