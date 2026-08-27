@@ -86,6 +86,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Operation | Description |
 |-----------|-------------|
 | `concat` | N-ary input concatenation (MergeTransform) |
+| `diff` | Byte-level diff of 2 inputs (MergeTransform) |
 
 ### Binary Analysis
 | Operation | Description |
