@@ -1,5 +1,6 @@
 pub mod blake3;
 pub mod crc32;
+pub mod hmac;
 use digest::Digest;
 use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
 use blake2::{Blake2b512, Blake2s256};

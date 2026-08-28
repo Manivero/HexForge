@@ -41,5 +41,6 @@ infer = "0.19"
 fuzzyhash = "0.2"
 serde_yaml = "0.9"
 inventory = "0.3"
+hmac = "0.12"
 
 [dev-dependencies]

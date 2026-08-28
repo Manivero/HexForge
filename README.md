@@ -50,6 +50,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `sha512` | SHA-512 hash |
 | `sha3_256` | SHA3-256 hash |
 | `ssdeep` | SSDEEP fuzzy hash |
+| `hmac` | HMAC with key (md5/sha1/sha256/sha512/sha3_256, hexKey) |
 
 ### Cryptography
 | Operation | Description |
@@ -136,7 +137,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (196 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (201 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + Wasmtime fuel metering (NFR-9) + capability sandbox |
