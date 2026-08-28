@@ -56,7 +56,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `rot_n` | ROT-N shift (0–25) |
 | `xor` | Byte-wise XOR with cycling UTF-8 key |
 | `rc4` | RC4 stream cipher (hexKey support) |
-| `aes.encrypt` / `aes.decrypt` | AES-128/192/256 ECB/CBC (PKCS7, hex key/iv) |
+| `aes.encrypt` / `aes.decrypt` | AES-128/192/256 ECB/CBC (PKCS7) / CTR (no padding, hex key/iv) |
 | `aes_gcm.encrypt` / `aes_gcm.decrypt` | AES-GCM AEAD (128/256, nonce/AAD) |
 | `chacha20` | ChaCha20 stream cipher (hex key/nonce) |
 | `chacha20_poly1305.encrypt` / `decrypt` | ChaCha20-Poly1305 AEAD |
@@ -134,7 +134,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (157 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (184 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + stub Wasmtime host (FR-6) |
