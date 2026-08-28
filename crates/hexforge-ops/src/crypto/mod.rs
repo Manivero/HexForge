@@ -5,3 +5,4 @@ pub mod chacha20_poly1305;
 pub mod rc4;
 pub mod rot_n;
 pub mod xor;
+pub mod xor_brute;
