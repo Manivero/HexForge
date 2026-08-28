@@ -11,6 +11,7 @@ dist/
 
 # Tauri build output
 src-tauri/target/
+src-tauri/gen/
 
 # Environment and secrets
 .env
@@ -34,5 +35,4 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.out
-.fe-build/
 .opencode/

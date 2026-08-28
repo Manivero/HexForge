@@ -201,7 +201,7 @@ npm run build       # tsc --noEmit + vite build
 |----------|------|
 | Done | Native performance profiling — `cargo bench -p hexforge-stream` criterion |
 | Done | i18n en/ru — `src/lib/i18n.ts` + locale toggle |
-| Near | Plugin host — stub `hexforge-plugin-host` Ed25519 verify, Wasmtime next |
+| Done | Plugin host — `hexforge-plugin-host` Ed25519 verify + Wasmtime fuel metering (NFR-9) + capability sandbox |
 | Done | Import CyberChef recipes — `import_cyberchef_recipe` |
 | Future | Magic Wand — heuristic chain detection (auto_decode implemented) |
 | Done | Diff between snapshots (FR-4.3) — `diff_snapshots` |
@@ -240,7 +240,9 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 ## Known Limitations
 
 - **Compression fully implemented** — gzip/zlib/deflate/bzip2/lzma done
-- **Plugin host stub** — `hexforge-plugin-host` Ed25519 verify done, Wasmtime execution next
+- **Plugin host — Wasmtime implemented** — `hexforge-plugin-host` Ed25519 verify + fuel-metered Wasmtime (NFR-9) + capability sandbox; Component Model WIT next
+- **Crypto AES modes** — ECB/CBC/CTR (PKCS7 for ECB/CBC, no padding for CTR), GCM and ChaCha20-Poly1305 done
+- **DNS parser hardened** — `network.dns_parse` with compression pointers, loop guards, 8 tests
 - **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)

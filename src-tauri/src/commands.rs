@@ -308,9 +308,6 @@ pub async fn patch_source(
                 "patch range [{offset}..{required_end}) exceeds source size {size}; growth is not supported in MVP"
             ),
         ),
-        WriteRegionError::ReadOnlyMapped => HexForgeError::invalid_input(
-            "source is a memory-mapped file and cannot be patched (read-only MVP)",
-        ),
     })?;
 
     // Консервативная инвалидация кэша (см. OutputCache::clear): патч меняет

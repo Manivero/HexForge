@@ -115,11 +115,12 @@ impl SourceStore {
 }
 
 /// Ошибки patch_source; маппинг в HexForgeError — на IPC-слое.
+/// `ReadOnlyMapped` удалён: COW материализует Mapped в InMemory при первом патче (FR Hex Editor),
+/// поэтому патч файловой мапы больше не возвращается как read-only ошибка.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WriteRegionError {
     UnknownHandle,
     OutOfBounds { size: usize, required_end: usize },
-    ReadOnlyMapped,
 }
 
 /// Content-addressed LRU-кэш выходов узлов планировщика (см. scheduler.rs).
@@ -418,8 +419,12 @@ mod tests {
     fn write_region_error_variants_are_distinguishable() {
         use super::WriteRegionError;
         assert_ne!(
-            WriteRegionError::ReadOnlyMapped,
+            WriteRegionError::OutOfBounds { size: 1, required_end: 2 },
             WriteRegionError::UnknownHandle
+        );
+        assert_ne!(
+            WriteRegionError::OutOfBounds { size: 1, required_end: 2 },
+            WriteRegionError::OutOfBounds { size: 2, required_end: 3 }
         );
     }
 
