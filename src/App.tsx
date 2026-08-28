@@ -29,6 +29,8 @@ export function App() {
   const sourceHandle = useAppStore((s) => s.sourceHandle);
   const snapshots = useAppStore((s) => s.snapshots);
   const operationsError = useAppStore((s) => s.operationsError);
+  const exportRecipe = useAppStore((s) => s.exportRecipe);
+  const importRecipe = useAppStore((s) => s.importRecipe);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -66,6 +68,18 @@ export function App() {
   const nodeCount = Object.keys(nodes).length;
   const selectedNode = selectedNodeId ? nodes[selectedNodeId] : undefined;
 
+  const handleExport = React.useCallback(async () => {
+    const path = window.prompt(t(locale, "app.exportPrompt"), "recipe.hexforge");
+    if (!path) return;
+    await exportRecipe(path);
+  }, [locale, exportRecipe]);
+
+  const handleImport = React.useCallback(async () => {
+    const path = window.prompt(t(locale, "app.importPrompt"), "recipe.hexforge");
+    if (!path) return;
+    await importRecipe(path);
+  }, [locale, importRecipe]);
+
   return (
     <div className="flex h-screen w-screen flex-col bg-surface-0 text-text-primary">
       <div
@@ -73,13 +87,29 @@ export function App() {
         className="flex h-9 shrink-0 items-center justify-between border-b border-border-subtle px-3 text-2xs text-text-muted"
       >
         <span>HexForge</span>
-        <button
-          onClick={() => setLocale(locale === "en" ? "ru" : "en")}
-          className="rounded border border-border-subtle px-2 py-0.5 text-2xs"
-          aria-label="toggle locale"
-        >
-          {locale.toUpperCase()}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void handleExport()}
+            className="rounded border border-border-subtle px-2 py-0.5 text-2xs hover:border-border-focus hover:text-accent"
+            aria-label="export recipe"
+          >
+            {t(locale, "app.export")}
+          </button>
+          <button
+            onClick={() => void handleImport()}
+            className="rounded border border-border-subtle px-2 py-0.5 text-2xs hover:border-border-focus hover:text-accent"
+            aria-label="import recipe"
+          >
+            {t(locale, "app.import")}
+          </button>
+          <button
+            onClick={() => setLocale(locale === "en" ? "ru" : "en")}
+            className="rounded border border-border-subtle px-2 py-0.5 text-2xs"
+            aria-label="toggle locale"
+          >
+            {locale.toUpperCase()}
+          </button>
+        </div>
       </div>
 
       <main className="flex flex-1 items-start justify-center overflow-y-auto p-6">

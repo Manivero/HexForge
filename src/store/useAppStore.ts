@@ -16,6 +16,8 @@ import {
   listSnapshots as ipcListSnapshots,
   jumpToSnapshot as ipcJumpToSnapshot,
   cancelNode as ipcCancelNode,
+  exportRecipe as ipcExportRecipe,
+  importRecipe as ipcImportRecipe,
   decodeBase64Chunk,
 } from "@/lib/ipc";
 import { HexForgeCommandError } from "@/lib/ipc-contract";
@@ -121,6 +123,10 @@ interface DataSlice {
    * завершит цепочку ошибкой Cancelled на ближайшем чекпоинте. */
   cancelRunningNode: () => Promise<void>;
   jumpToSnapshot: (snapshotId: SnapshotId) => Promise<void>;
+  /** Экспорт текущего графа в файл рецепта (FR-7.1) */
+  exportRecipe: (targetPath: string) => Promise<boolean>;
+  /** Импорт графа из файла рецепта, показывает missingOperations (FR-7.1/4.2) */
+  importRecipe: (sourcePath: string) => Promise<boolean>;
 }
 
 export type AppStore = UiSlice &
@@ -480,6 +486,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
       await loadSnapshots(set);
     } catch (err) {
       set({ jumpingSnapshotId: null, runError: formatIpcError(err) });
+    }
+  },
+  exportRecipe: async (targetPath) => {
+    try {
+      await ipcExportRecipe({ graph: { nodes: get().nodes }, targetPath });
+      set({ runError: null });
+      return true;
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
+      return false;
+    }
+  },
+  importRecipe: async (sourcePath) => {
+    try {
+      const resp = await ipcImportRecipe({ sourcePath });
+      const missing = resp.missingOperations;
+      if (missing.length > 0) {
+        set({
+          runError: t(get().locale, "app.missingOps", { ops: missing.join(", ") }),
+        });
+      } else {
+        set({ runError: null });
+      }
+      set((s) => ({
+        nodes: resp.graph.nodes as Record<string, OperationNodeDto>,
+        selectedNodeId: null,
+        graphVersion: s.graphVersion + 1,
+        staleNodeIds: [],
+        lastRun: null,
+        ranAtGraphVersion: null,
+        previewText: null,
+        previewHex: null,
+        previewTruncated: false,
+        hexOffset: null,
+        hexBytes: null,
+      }));
+      await get().syncGraphToBackend();
+      return true;
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
+      return false;
     }
   },
 }));
