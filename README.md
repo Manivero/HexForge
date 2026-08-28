@@ -24,7 +24,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 ### Encoding
 | Operation | Description |
 |-----------|-------------|
-| `base32.encode` / `base32.decode` | RFC 4648 Base32 |
+| `base32.encode` / `base32.decode` | RFC 4648 Base32 — streamable (PerChunk) |
 | `base58.encode` / `base58.decode` | Bitcoin Base58 |
 | `base64.encode` / `base64.decode` | Standard / URL-safe / Custom (64-char alphabet) Base64 — streamable (PerChunk) |
 | `base85.encode` / `base85.decode` | Ascii85/Base85 (4→5, `z` for zeros) |
@@ -137,7 +137,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (201 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (203 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + Wasmtime fuel metering (NFR-9) + capability sandbox |
