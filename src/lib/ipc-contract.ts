@@ -3,25 +3,18 @@
 // обязана иметь структуры, побайтово соответствующие этим типам через
 // #[serde(rename_all = "camelCase")].
 //
-// Статус реализации на Rust-стороне на срезе hexforge-stream (см. commands.rs
-// и src-tauri/src/scheduler.rs):
+// Статус реализации на Rust-стороне (см. commands.rs и scheduler.rs):
 //   ✅ реализовано:  greet, listOperations, openFile, createLiteralSource,
 //                    previewBytes, releaseSource, patchSource,
-//                    setGraph,
-//                    runNode (async + spawn_blocking; chunked apply_chunk для
-//                    streamable-операций; memoization по reproducibility_key;
-//                    merge-узлы через MergeTransform/streaming.concat;
-//                    события op://progress; Snapshot в History за каждый узел),
 //                    setGraph (+ эмит graph://invalidated со staleNodeIds),
-//                    cancelNode (кооперативная отмена, kind="Cancelled"),
-//                    listSnapshots, diffSnapshots, exportRecipe, importRecipe,
-//                    importCyberChefRecipe (mapping To Base64/From Base64/To Hex/ROT13/XOR/URL/Gzip/Zlib),
-//                    jumpToSnapshot (lineage-реплей из корневого источника,
-//                    перенос головы истории),
-//                    listPlugins (заглушка до hexforge-plugin-host)
-//   ⏳ специфицировано, не подключено:
-//                    importCyberChefRecipe, installPlugin, grantCapability,
-//                    revokeCapability — ждут hexforge-plugin-host.
+//                    runNode (async + spawn_blocking; chunked apply_chunk;
+//                    memoization по reproducibility_key; merge через MergeTransform;
+//                    события op://progress; Snapshot за каждый узел),
+//                    cancelNode (Cancelled), listSnapshots, diffSnapshots,
+//                    exportRecipe, importRecipe, importCyberChefRecipe (28+ mappings:
+//                    Base64/Hex/Base32/ROT13/Reverse/URL/Gzip/Zlib/Bzip2/LZMA/XOR/MD5/SHA1/SHA2/SHA256/SHA512/SHA3/BLAKE2b/s/BLAKE3/CRC32/SSDEEP/Entropy/Strings/Magic),
+//                    jumpToSnapshot (lineage-реплей), listPlugins (Ed25519 + Wasmtime fuel)
+//   ⏳ специфицировано, не подключено: installPlugin, grantCapability, revokeCapability — ждут Component Model WIT.
 //
 // Паритет типов с Rust-стороной защищён golden-тестами в
 // src-tauri/src/commands.rs (tests::*_matches_ts_contract): переименование
@@ -181,7 +174,7 @@ export interface DiffSnapshotsResponse {
   diffText: string;
 }
 
-// ---------- recipe export/import (⏳ не подключено) ----------
+// ---------- recipe export/import ----------
 export interface ExportRecipeRequest {
   graph: GraphDto;
   targetPath: string;
