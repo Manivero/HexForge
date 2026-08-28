@@ -714,10 +714,36 @@ fn map_cyberchef_op(op: &str, _args: &[serde_json::Value]) -> Option<(String, se
         "Gzip Decompress" => Some(("compression.gzip.decompress".into(), serde_json::json!({}))),
         "Zlib Deflate" => Some(("compression.zlib.compress".into(), serde_json::json!({}))),
         "Zlib Inflate" => Some(("compression.zlib.decompress".into(), serde_json::json!({}))),
+        "Bzip2 Compress" => Some(("compression.bzip2.compress".into(), serde_json::json!({}))),
+        "Bzip2 Decompress" => Some(("compression.bzip2.decompress".into(), serde_json::json!({}))),
+        "LZMA Compress" => Some(("compression.lzma.compress".into(), serde_json::json!({}))),
+        "LZMA Decompress" => Some(("compression.lzma.decompress".into(), serde_json::json!({}))),
         "XOR" => {
             let key = _args.first().and_then(|v| v.as_str()).unwrap_or("key");
             Some(("crypto.xor".into(), serde_json::json!({"key": key})))
         }
+        "MD5" => Some(("hashing.md5".into(), serde_json::json!({}))),
+        "SHA1" => Some(("hashing.sha1".into(), serde_json::json!({}))),
+        "SHA2" => {
+            let bits = _args.first().and_then(|v| v.as_u64()).unwrap_or(256);
+            match bits {
+                512 => Some(("hashing.sha512".into(), serde_json::json!({}))),
+                384 => Some(("hashing.sha512".into(), serde_json::json!({}))), // fallback: no sha384 op, use sha512
+                224 => Some(("hashing.sha256".into(), serde_json::json!({}))),
+                _ => Some(("hashing.sha256".into(), serde_json::json!({}))),
+            }
+        }
+        "SHA256" => Some(("hashing.sha256".into(), serde_json::json!({}))),
+        "SHA512" => Some(("hashing.sha512".into(), serde_json::json!({}))),
+        "SHA3" => Some(("hashing.sha3_256".into(), serde_json::json!({}))),
+        "BLAKE2b" => Some(("hashing.blake2b".into(), serde_json::json!({}))),
+        "BLAKE2s" => Some(("hashing.blake2s".into(), serde_json::json!({}))),
+        "BLAKE3" => Some(("hashing.blake3".into(), serde_json::json!({}))),
+        "CRC32" => Some(("hashing.crc32".into(), serde_json::json!({}))),
+        "SSDEEP" | "SSDeep" => Some(("hashing.ssdeep".into(), serde_json::json!({}))),
+        "Entropy" => Some(("binary.entropy".into(), serde_json::json!({}))),
+        "Strings" => Some(("binary.strings_extract".into(), serde_json::json!({}))),
+        "Detect File Type" | "Magic" => Some(("binary.magic".into(), serde_json::json!({}))),
         _ => None,
     }
 }
