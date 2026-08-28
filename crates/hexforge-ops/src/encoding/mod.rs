@@ -2,6 +2,7 @@ pub mod auto;
 pub mod base32;
 pub mod base58;
 pub mod base64;
+pub mod base85;
 pub mod hex;
 pub mod json;
 pub mod msgpack;
