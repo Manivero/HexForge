@@ -73,6 +73,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `http_parse` | HTTP request/response parse |
 | `user_agent_parse` | User-Agent browser/OS/device |
 | `ip_parse` | IP parse (v4/v6, private/loopback) |
+| `dns_parse` | DNS header/question parse |
 
 ### Text
 | Operation | Description |

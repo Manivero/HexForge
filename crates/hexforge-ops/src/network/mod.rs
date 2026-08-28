@@ -1,3 +1,4 @@
+pub mod dns;
 pub mod http;
 pub mod ip;
 pub mod jwt;
