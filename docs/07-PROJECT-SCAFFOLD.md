@@ -50,11 +50,11 @@ hexforge/
 | Компонент | Статус | Верификация |
 |---|---|---|
 | `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort O(V+E), cycle, fork/merge, lineage + parent-cycle guard, order) |
-| `hexforge-ops` — 43+ операции | ✅ | `cargo test -p hexforge-ops` — 188 теста (см. ниже); `clippy -D warnings` 0 |
+| `hexforge-ops` — 44+ операции | ✅ | `cargo test -p hexforge-ops` — 191 теста (см. ниже); `clippy -D warnings` 0 |
 | Encoding | ✅ | base32 RFC4648, base58 Bitcoin, base64 std/url_safe/custom (64-char) **streamable** (PerChunk, encode leftover 2B/decode leftover 3 chars, 4 new chunked tests), hex (streamable), quoted_printable RFC2045, json pretty/minify, xml pretty (quick-xml), msgpack (rmp-serde), protobuf raw walk — roundtrip + invalid input |
 | Hashing | ✅ | blake3, blake2b/s, crc32 IEEE (cbf43926), md5, sha1/sha256/sha512, sha3_256, ssdeep — known vectors |
 | Compression | ✅ | gzip/zlib/deflate (flate2), bzip2 (bzip2), lzma/xz (xz2) — roundtrip + level param, large 50k |
-| Text | ✅ | case_transform, html encode/decode, regex_extract/replace (regex 1), reverse, rot13, unicode_normalize (nfc/nfd/nfkc/nfkd), trim (both/start/end) |
+| Text | ✅ | case_transform, html encode/decode, regex_extract/replace (regex 1), reverse, rot13, unicode_normalize (nfc/nfd/nfkc/nfkd), trim (both/start/end), remove_whitespace (streamable, PerChunk) |
 | Network | ✅ | url_encode/decode RFC3986, url_parse (url crate), jwt_decode (base64url), pcap_info + pcap_parse L2-L4, dns_parse (header/compression loops hardened, 8 tests), http_parse, user_agent, ip_parse (v4/v6) |
 | Crypto | ✅ | rot_n, xor (UTF-8 key), rc4 (hexKey), aes-128/192/256 ecb/cbc (PKCS7) + ctr (no padding, ctr 0.9), aes-gcm 128/256, chacha20 (RFC8439) + poly1305 AEAD — NIST vectors, involution |
 | Streaming | ✅ | concat (MergeTransform), diff (2-input byte diff) |
@@ -116,7 +116,7 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 274 зелёных (Rust: core 9, ops 188, stream 7, engine 34, tauri 22, cli 4, plugin-host 10) + 40 FE (fuzz, bytes, graph, i18n) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 253kB, `npm run test:fe` 40.
+Все изменения перепроверены: `cargo test --workspace` — 277 зелёных (Rust: core 9, ops 191, stream 7, engine 34, tauri 22, cli 4, plugin-host 10) + 40 FE (fuzz, bytes, graph, i18n) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 253kB, `npm run test:fe` 40.
 1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
 2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
 3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.

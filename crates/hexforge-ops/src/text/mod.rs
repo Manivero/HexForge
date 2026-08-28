@@ -5,3 +5,4 @@ pub mod reverse;
 pub mod rot13;
 pub mod trim;
 pub mod unicode;
+pub mod whitespace;
