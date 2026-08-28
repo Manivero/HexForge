@@ -8,10 +8,13 @@ import type {
   CreateLiteralSourceResponse,
   DiffSnapshotsRequest,
   DiffSnapshotsResponse,
+  ExportRecipeRequest,
   GraphDto,
   HexForgeError,
   ImportCyberChefRecipeRequest,
   ImportCyberChefRecipeResponse,
+  ImportRecipeRequest,
+  ImportRecipeResponse,
   JumpToSnapshotRequest,
   OpenFileRequest,
   OpenFileResponse,
@@ -106,6 +109,14 @@ export function diffSnapshots(req: DiffSnapshotsRequest): Promise<DiffSnapshotsR
 
 export function importCyberChefRecipe(req: ImportCyberChefRecipeRequest): Promise<ImportCyberChefRecipeResponse> {
   return call<ImportCyberChefRecipeResponse>("import_cyberchef_recipe", { req });
+}
+
+export function exportRecipe(req: ExportRecipeRequest): Promise<void> {
+  return call<void>("export_recipe", { req });
+}
+
+export function importRecipe(req: ImportRecipeRequest): Promise<ImportRecipeResponse> {
+  return call<ImportRecipeResponse>("import_recipe", { req });
 }
 
 export function listPlugins(): Promise<PluginManifestDto[]> {
