@@ -26,7 +26,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 |-----------|-------------|
 | `base32.encode` / `base32.decode` | RFC 4648 Base32 |
 | `base58.encode` / `base58.decode` | Bitcoin Base58 |
-| `base64.encode` / `base64.decode` | Standard / URL-safe / Custom (64-char alphabet) Base64 |
+| `base64.encode` / `base64.decode` | Standard / URL-safe / Custom (64-char alphabet) Base64 — streamable (PerChunk) |
 | `hex.encode` / `hex.decode` | Hexadecimal encoding |
 | `quoted_printable.encode` / `decode` | Quoted-Printable (RFC 2045) |
 | `json.pretty` / `json.minify` | JSON formatting |
@@ -134,10 +134,10 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (184 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (188 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
-| `hexforge-plugin-host` | Ed25519 manifest verify + stub Wasmtime host (FR-6) |
+| `hexforge-plugin-host` | Ed25519 manifest verify + Wasmtime fuel metering (NFR-9) + capability sandbox |
 | `src-tauri` | Tauri shell: typed IPC commands, frontend serving |
 | `hexforge-cli` | Headless recipe runner (no GUI) |
 
@@ -243,6 +243,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **Plugin host — Wasmtime implemented** — `hexforge-plugin-host` Ed25519 verify + fuel-metered Wasmtime (NFR-9) + capability sandbox; Component Model WIT next
 - **Crypto AES modes** — ECB/CBC/CTR (PKCS7 for ECB/CBC, no padding for CTR), GCM and ChaCha20-Poly1305 done
 - **DNS parser hardened** — `network.dns_parse` with compression pointers, loop guards, 8 tests
+- **Base64 streamable** — `encoding.base64` now PerChunk (encode leftover 2 bytes, decode leftover 3 chars) for 32GB files (NFR-2)
 - **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache concurrently via blocking pool (fork graphs parallel)
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)

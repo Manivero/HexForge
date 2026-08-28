@@ -50,8 +50,8 @@ hexforge/
 | Компонент | Статус | Верификация |
 |---|---|---|
 | `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort O(V+E), cycle, fork/merge, lineage + parent-cycle guard, order) |
-| `hexforge-ops` — 43+ операции | ✅ | `cargo test -p hexforge-ops` — 184 теста (см. ниже); `clippy -D warnings` 0 |
-| Encoding | ✅ | base32 RFC4648, base58 Bitcoin, base64 std/url_safe/custom (64-char), hex (streamable), quoted_printable RFC2045, json pretty/minify, xml pretty (quick-xml), msgpack (rmp-serde), protobuf raw walk — roundtrip + invalid input |
+| `hexforge-ops` — 43+ операции | ✅ | `cargo test -p hexforge-ops` — 188 теста (см. ниже); `clippy -D warnings` 0 |
+| Encoding | ✅ | base32 RFC4648, base58 Bitcoin, base64 std/url_safe/custom (64-char) **streamable** (PerChunk, encode leftover 2B/decode leftover 3 chars, 4 new chunked tests), hex (streamable), quoted_printable RFC2045, json pretty/minify, xml pretty (quick-xml), msgpack (rmp-serde), protobuf raw walk — roundtrip + invalid input |
 | Hashing | ✅ | blake3, blake2b/s, crc32 IEEE (cbf43926), md5, sha1/sha256/sha512, sha3_256, ssdeep — known vectors |
 | Compression | ✅ | gzip/zlib/deflate (flate2), bzip2 (bzip2), lzma/xz (xz2) — roundtrip + level param, large 50k |
 | Text | ✅ | case_transform, html encode/decode, regex_extract/replace (regex 1), reverse, rot13, unicode_normalize (nfc/nfd/nfkc/nfkd), trim (both/start/end) |
@@ -72,7 +72,7 @@ hexforge/
 | InspectorPanel | ✅ | Auto-form from paramsSchema, stale badge FR-1.6 |
 | hexforge-stream + engine | ✅ | `DEFAULT_CHUNK_SIZE_BYTES = 64 MiB` FR-5.2, fusion + parallel pipeline (stages×4×64MiB=256MiB), `reproducibility_key` LRU (true LRU, 256MB), `cancel_node` Cancelled, `MergeTransform`, dead code ReadOnlyMapped removed |
 | CLI | ✅ | `hexforge-cli run/validate` — `validate_graph` + DAG + version check, 4 tests + progress eprintln |
-| Import | ✅ | `import_recipe` + `import_cyberchef_recipe` (To Base64/From Base64/To Hex/ROT13/XOR/URL/Gzip/Zlib mapping, unmapped list) |
+| Import | ✅ | `import_recipe` + `import_cyberchef_recipe` (28+ mappings: Base64/Hex/Base32/ROT13/Reverse/URL/Gzip/Zlib/Bzip2/LZMA/XOR/MD5/SHA1/SHA2/SHA3/BLAKE2b/s/BLAKE3/CRC32/SSDEEP/Entropy/Strings/Magic, unmapped list) |
 | .env.example + .gitignore | ✅ | `*.out` + `!.env.example`, `.env` ignored, `src-tauri/gen` ignored, secrets scan 0 |
 | Chunk 64 MiB (FR-5.2) | ✅ | `hexforge-stream:23` 64 MiB, parallel threshold = 64 MiB, engine tests with 64M vectors (24s) |
 | Plugin host | ✅ | `hexforge-plugin-host` Ed25519 verify + Wasmtime fuel metering (NFR-9, 10M, 2MiB stack) + capability sandbox, 10 tests (signature bypass fix, fuel exhaustion, trap isolation) |
@@ -116,7 +116,7 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 270 зелёных (Rust: core 9, ops 184, stream 7, engine 34, tauri 22, cli 4, plugin-host 10) + 40 FE (fuzz, bytes, graph, i18n) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 253kB, `npm run test:fe` 40.
+Все изменения перепроверены: `cargo test --workspace` — 274 зелёных (Rust: core 9, ops 188, stream 7, engine 34, tauri 22, cli 4, plugin-host 10) + 40 FE (fuzz, bytes, graph, i18n) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 253kB, `npm run test:fe` 40.
 1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
 2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
 3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.
