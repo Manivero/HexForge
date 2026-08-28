@@ -2068,7 +2068,7 @@ dependencies = [
  "infer",
  "inventory",
  "md-5",
- "quick-xml 0.31.0",
+ "quick-xml",
  "regex",
  "rmp",
  "rmp-serde",
@@ -3322,7 +3322,7 @@ checksum = "7da1d65da6dd5d1e44199ac0f58712d241c0f439f80adea8924d832384087f85"
 dependencies = [
  "base64 0.22.1",
  "indexmap 2.14.0",
- "quick-xml 0.41.0",
+ "quick-xml",
  "serde",
  "time",
 ]
@@ -3544,15 +3544,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "quick-xml"
-version = "0.31.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
-dependencies = [
- "memchr",
 ]
 
 [[package]]
