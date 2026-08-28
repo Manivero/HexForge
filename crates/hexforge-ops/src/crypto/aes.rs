@@ -27,7 +27,7 @@ where
     let mut buf = vec![0u8; data.len() + 16];
     buf[..data.len()].copy_from_slice(data);
     let ct = EcbEncryptor::<K>::new_from_slice(key)
-        .unwrap()
+        .map_err(|e| TransformError::Internal(format!("AES ECB init failed: {e}")))?
         .encrypt_padded_mut::<Pkcs7>(&mut buf, data.len())
         .map_err(|e| TransformError::Internal(format!("AES ECB encrypt failed: {e}")))?;
     Ok(ct.to_vec())
@@ -40,7 +40,7 @@ where
 {
     let mut buf = data.to_vec();
     let pt = EcbDecryptor::<K>::new_from_slice(key)
-        .unwrap()
+        .map_err(|e| TransformError::Internal(format!("AES ECB init failed: {e}")))?
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| TransformError::InvalidInput { reason: format!("AES ECB decrypt failed: {e}") })?;
     Ok(pt.to_vec())
@@ -54,7 +54,7 @@ where
     let mut buf = vec![0u8; data.len() + 16];
     buf[..data.len()].copy_from_slice(data);
     let ct = CbcEncryptor::<K>::new_from_slices(key, iv)
-        .unwrap()
+        .map_err(|e| TransformError::Internal(format!("AES CBC init failed: {e}")))?
         .encrypt_padded_mut::<Pkcs7>(&mut buf, data.len())
         .map_err(|e| TransformError::Internal(format!("AES CBC encrypt failed: {e}")))?;
     Ok(ct.to_vec())
@@ -67,7 +67,7 @@ where
 {
     let mut buf = data.to_vec();
     let pt = CbcDecryptor::<K>::new_from_slices(key, iv)
-        .unwrap()
+        .map_err(|e| TransformError::Internal(format!("AES CBC init failed: {e}")))?
         .decrypt_padded_mut::<Pkcs7>(&mut buf)
         .map_err(|e| TransformError::InvalidInput { reason: format!("AES CBC decrypt failed: {e}") })?;
     Ok(pt.to_vec())
@@ -171,16 +171,19 @@ impl Transform for AesEncrypt {
         TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
     }
     fn apply<'a>(&self, input: ByteView<'a>, params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
-        let key = parse_hex_param(params, "key", true)?.unwrap();
+        let key = parse_hex_param(params, "key", true)?
+            .ok_or_else(|| TransformError::InvalidParameter { field: "key".into(), reason: "hex parameter 'key' is required".into() })?;
         let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("cbc");
         let out = match mode {
             "ecb" => aes_encrypt_ecb(&key, input.as_ref())?,
             "cbc" => {
-                let iv = parse_hex_param(params, "iv", true)?.unwrap();
+                let iv = parse_hex_param(params, "iv", true)?
+                    .ok_or_else(|| TransformError::InvalidParameter { field: "iv".into(), reason: "hex parameter 'iv' is required for cbc".into() })?;
                 aes_encrypt_cbc(&key, &iv, input.as_ref())?
             }
             "ctr" => {
-                let iv = parse_hex_param(params, "iv", true)?.unwrap();
+                let iv = parse_hex_param(params, "iv", true)?
+                    .ok_or_else(|| TransformError::InvalidParameter { field: "iv".into(), reason: "hex parameter 'iv' is required for ctr".into() })?;
                 aes_crypt_ctr(&key, &iv, input.as_ref())?
             }
             _ => return Err(TransformError::InvalidParameter { field: "mode".into(), reason: "mode must be ecb|cbc|ctr".into() }),
@@ -219,16 +222,19 @@ impl Transform for AesDecrypt {
         TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
     }
     fn apply<'a>(&self, input: ByteView<'a>, params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
-        let key = parse_hex_param(params, "key", true)?.unwrap();
+        let key = parse_hex_param(params, "key", true)?
+            .ok_or_else(|| TransformError::InvalidParameter { field: "key".into(), reason: "hex parameter 'key' is required".into() })?;
         let mode = params.get("mode").and_then(|v| v.as_str()).unwrap_or("cbc");
         let out = match mode {
             "ecb" => aes_decrypt_ecb(&key, input.as_ref())?,
             "cbc" => {
-                let iv = parse_hex_param(params, "iv", true)?.unwrap();
+                let iv = parse_hex_param(params, "iv", true)?
+                    .ok_or_else(|| TransformError::InvalidParameter { field: "iv".into(), reason: "hex parameter 'iv' is required for cbc".into() })?;
                 aes_decrypt_cbc(&key, &iv, input.as_ref())?
             }
             "ctr" => {
-                let iv = parse_hex_param(params, "iv", true)?.unwrap();
+                let iv = parse_hex_param(params, "iv", true)?
+                    .ok_or_else(|| TransformError::InvalidParameter { field: "iv".into(), reason: "hex parameter 'iv' is required for ctr".into() })?;
                 // CTR decrypt == encrypt (xor keystream)
                 aes_crypt_ctr(&key, &iv, input.as_ref())?
             }
