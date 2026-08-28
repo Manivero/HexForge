@@ -137,7 +137,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (203 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (206 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + Wasmtime fuel metering (NFR-9) + capability sandbox |
@@ -248,6 +248,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **DNS parser hardened** — `network.dns_parse` with compression pointers, loop guards, 8 tests
 - **Base64 streamable** — `encoding.base64` now PerChunk (encode leftover 2 bytes, decode leftover 3 chars) for 32GB files (NFR-2)
 - **Base85** — `encoding.base85` Ascii85 (4→5, `z` for 4 zeros) with 5 tests
+- **Hashing streamable** — `hashing.md5/sha1/sha256/sha512/sha3_256/blake2b/s/crc32` now `streamable:true, Constant` with chunked `apply_chunk` for 32GB files (3 new chunked tests)
 - **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache concurrently via blocking pool (fork graphs parallel)
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)

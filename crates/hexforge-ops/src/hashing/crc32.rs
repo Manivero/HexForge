@@ -40,6 +40,16 @@ fn crc32(data: &[u8]) -> u32 {
     crc ^ 0xFFFF_FFFF
 }
 
+struct Crc32State {
+    crc: u32,
+}
+
+impl Default for Crc32State {
+    fn default() -> Self {
+        Self { crc: 0xFFFF_FFFF }
+    }
+}
+
 pub struct Crc32Hash;
 
 impl Transform for Crc32Hash {
@@ -58,7 +68,7 @@ impl Transform for Crc32Hash {
     fn capabilities(&self) -> TransformCapabilities {
         TransformCapabilities {
             deterministic: true,
-            streamable: false,
+            streamable: true,
             memory_cost: MemoryCost::Constant,
         }
     }
@@ -70,6 +80,28 @@ impl Transform for Crc32Hash {
     ) -> Result<ByteView<'a>, TransformError> {
         let value = crc32(input.as_ref());
         Ok(Cow::Owned(format!("{value:08x}").into_bytes()))
+    }
+    fn apply_chunk(
+        &self,
+        chunk: &[u8],
+        is_last: bool,
+        state: &mut Box<dyn std::any::Any + Send>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<Vec<u8>, TransformError> {
+        if state.downcast_ref::<Crc32State>().is_none() {
+            *state = Box::new(Crc32State::default());
+        }
+        let st = state.downcast_mut::<Crc32State>().expect("Crc32State seeded");
+        let t = table();
+        for &b in chunk {
+            st.crc = t[((st.crc ^ b as u32) & 0xff) as usize] ^ (st.crc >> 8);
+        }
+        if is_last {
+            let value = st.crc ^ 0xFFFF_FFFF;
+            return Ok(format!("{value:08x}").into_bytes());
+        }
+        Ok(Vec::new())
     }
 }
 
@@ -113,5 +145,18 @@ mod tests {
         let a = Crc32Hash.apply(Cow::Borrowed(b"a"), &json!({}), &ctx).unwrap();
         let b = Crc32Hash.apply(Cow::Borrowed(b"b"), &json!({}), &ctx).unwrap();
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn chunked_matches_whole() {
+        let ctx = NullExecutionContext;
+        let data = b"hello world crc32 chunked test";
+        let whole = Crc32Hash.apply(Cow::Borrowed(data), &json!({}), &ctx).unwrap();
+        let mut state: Box<dyn std::any::Any + Send> = Box::new(());
+        let mut out = Vec::new();
+        out.extend_from_slice(&Crc32Hash.apply_chunk(b"hello ", false, &mut state, &json!({}), &ctx).unwrap());
+        out.extend_from_slice(&Crc32Hash.apply_chunk(b"world ", false, &mut state, &json!({}), &ctx).unwrap());
+        out.extend_from_slice(&Crc32Hash.apply_chunk(b"crc32 chunked test", true, &mut state, &json!({}), &ctx).unwrap());
+        assert_eq!(out, whole.as_ref());
     }
 }
