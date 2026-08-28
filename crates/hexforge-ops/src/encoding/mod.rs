@@ -8,3 +8,4 @@ pub mod msgpack;
 pub mod protobuf;
 pub mod quoted_printable;
 pub mod xml;
+pub mod yaml;

@@ -38,6 +38,7 @@ rmp = "0.8"
 goblin = "0.8"
 infer = "0.19"
 fuzzyhash = "0.2"
+serde_yaml = "0.9"
 inventory = "0.3"
 
 [dev-dependencies]
