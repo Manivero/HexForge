@@ -68,8 +68,8 @@ export function HistoryPanel() {
       ) : (
         <>
           <p className="mb-2 text-2xs text-text-muted">
-            Клик — прыжок (реплей lineage). Запуск узла после прыжка создаёт
-            ветку от выбранной точки (FR-4.1).
+            Клик — прыжок (реплей lineage). Запуск узла после прыжка создаёт ветку от выбранной
+            точки (FR-4.1).
           </p>
           <ol className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
             {rows.map(({ snap, depth }) => {
@@ -79,17 +79,12 @@ export function HistoryPanel() {
                 (() => {
                   // Точка ветвления: у этого снапшота есть "сиблинг" слева —
                   // то есть родитель имеет более одного ребёнка.
-                  const siblings = snapshots.filter(
-                    (other) => other.parent === snap.parent,
-                  );
+                  const siblings = snapshots.filter((other) => other.parent === snap.parent);
                   return siblings.length > 1;
                 })();
 
               return (
-                <li
-                  key={snap.id}
-                  style={{ paddingLeft: `${depth * 14}px` }}
-                >
+                <li key={snap.id} style={{ paddingLeft: `${depth * 14}px` }}>
                   <button
                     onClick={() => void jumpToSnapshot(snap.id)}
                     disabled={jumpingSnapshotId !== null}

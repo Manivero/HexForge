@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 /// Ascii85 (Base85) — 4 bytes -> 5 chars in range '!'..'u' (33..117), 'z' for 4 zeros.
@@ -173,7 +175,12 @@ impl Transform for Base85Encode {
             memory_cost: MemoryCost::FullBuffer,
         }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         Ok(Cow::Owned(encode_base85(input.as_ref()).into_bytes()))
     }
 }
@@ -200,9 +207,16 @@ impl Transform for Base85Decode {
             memory_cost: MemoryCost::FullBuffer,
         }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         let s = String::from_utf8_lossy(input.as_ref());
-        let decoded = decode_base85(&s).map_err(|e| TransformError::InvalidInput { reason: format!("not valid base85: {e}") })?;
+        let decoded = decode_base85(&s).map_err(|e| TransformError::InvalidInput {
+            reason: format!("not valid base85: {e}"),
+        })?;
         Ok(Cow::Owned(decoded))
     }
 }
@@ -219,18 +233,26 @@ mod tests {
     fn roundtrip() {
         let ctx = NullExecutionContext;
         let data = b"Hello Base85 world! 12345";
-        let enc = Base85Encode.apply(Cow::Borrowed(data), &serde_json::json!({}), &ctx).unwrap();
-        let dec = Base85Decode.apply(enc, &serde_json::json!({}), &ctx).unwrap();
+        let enc = Base85Encode
+            .apply(Cow::Borrowed(data), &serde_json::json!({}), &ctx)
+            .unwrap();
+        let dec = Base85Decode
+            .apply(enc, &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), data);
     }
 
     #[test]
     fn zeros_encode_as_z() {
         let ctx = NullExecutionContext;
-        let enc = Base85Encode.apply(Cow::Borrowed(&[0,0,0,0]), &serde_json::json!({}), &ctx).unwrap();
+        let enc = Base85Encode
+            .apply(Cow::Borrowed(&[0, 0, 0, 0]), &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(enc.as_ref(), b"z");
-        let dec = Base85Decode.apply(enc, &serde_json::json!({}), &ctx).unwrap();
-        assert_eq!(dec.as_ref(), &[0,0,0,0]);
+        let dec = Base85Decode
+            .apply(enc, &serde_json::json!({}), &ctx)
+            .unwrap();
+        assert_eq!(dec.as_ref(), &[0, 0, 0, 0]);
     }
 
     #[test]
@@ -238,8 +260,12 @@ mod tests {
         let ctx = NullExecutionContext;
         for len in 1..7 {
             let data = vec![0xAB; len];
-            let enc = Base85Encode.apply(Cow::Borrowed(&data), &serde_json::json!({}), &ctx).unwrap();
-            let dec = Base85Decode.apply(enc, &serde_json::json!({}), &ctx).unwrap();
+            let enc = Base85Encode
+                .apply(Cow::Borrowed(&data), &serde_json::json!({}), &ctx)
+                .unwrap();
+            let dec = Base85Decode
+                .apply(enc, &serde_json::json!({}), &ctx)
+                .unwrap();
             assert_eq!(dec.as_ref(), data.as_slice(), "len {len}");
         }
     }
@@ -248,17 +274,23 @@ mod tests {
     fn known_vector() {
         // "Man" -> Ascii85 example: "Man " -> "9jqo^" per spec
         let ctx = NullExecutionContext;
-        let enc = Base85Encode.apply(Cow::Borrowed(b"Man "), &serde_json::json!({}), &ctx).unwrap();
+        let enc = Base85Encode
+            .apply(Cow::Borrowed(b"Man "), &serde_json::json!({}), &ctx)
+            .unwrap();
         // "Man " in Ascii85 is "9jqo^" (from Adobe example)
         assert_eq!(enc.as_ref(), b"9jqo^");
-        let dec = Base85Decode.apply(Cow::Borrowed(b"9jqo^"), &serde_json::json!({}), &ctx).unwrap();
+        let dec = Base85Decode
+            .apply(Cow::Borrowed(b"9jqo^"), &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), b"Man ");
     }
 
     #[test]
     fn rejects_invalid() {
         let ctx = NullExecutionContext;
-        let err = Base85Decode.apply(Cow::Borrowed(b"\xFF\xFE"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err = Base85Decode
+            .apply(Cow::Borrowed(b"\xFF\xFE"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
     }
 }

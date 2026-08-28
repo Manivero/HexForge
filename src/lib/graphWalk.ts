@@ -44,9 +44,7 @@ export interface LayoutNode {
  * от корней) — в конце. Чистая функция: замена на полноценный layout не меняет
  * API потребителя.
  */
-export function layoutOrder(
-  nodes: Record<string, OperationNodeDto>,
-): LayoutNode[] {
+export function layoutOrder(nodes: Record<string, OperationNodeDto>): LayoutNode[] {
   const children = new Map<string, string[]>();
   const roots: string[] = [];
   for (const node of Object.values(nodes)) {

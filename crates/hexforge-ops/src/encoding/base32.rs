@@ -79,7 +79,9 @@ impl Transform for Base32Encode {
         if state.downcast_ref::<Base32EncodeState>().is_none() {
             *state = Box::new(Base32EncodeState::default());
         }
-        let st = state.downcast_mut::<Base32EncodeState>().expect("Base32EncodeState seeded");
+        let st = state
+            .downcast_mut::<Base32EncodeState>()
+            .expect("Base32EncodeState seeded");
 
         let mut combined = Vec::with_capacity(st.leftover.len() + chunk.len());
         combined.extend_from_slice(&st.leftover);
@@ -172,10 +174,7 @@ impl Transform for Base32Decode {
                 continue;
             }
             let v = value_of(b).ok_or_else(|| TransformError::InvalidInput {
-                reason: format!(
-                    "invalid base32 character '{}' at position {i}",
-                    b as char
-                ),
+                reason: format!("invalid base32 character '{}' at position {i}", b as char),
             })?;
             bits = (bits << 5) | v as u32;
             count += 5;
@@ -205,7 +204,9 @@ impl Transform for Base32Decode {
         if state.downcast_ref::<Base32DecodeState>().is_none() {
             *state = Box::new(Base32DecodeState::default());
         }
-        let st = state.downcast_mut::<Base32DecodeState>().expect("Base32DecodeState seeded");
+        let st = state
+            .downcast_mut::<Base32DecodeState>()
+            .expect("Base32DecodeState seeded");
 
         let mut out = Vec::new();
         for (i, &b) in chunk.iter().enumerate() {
@@ -213,10 +214,7 @@ impl Transform for Base32Decode {
                 continue;
             }
             let v = value_of(b).ok_or_else(|| TransformError::InvalidInput {
-                reason: format!(
-                    "invalid base32 character '{}' at position {i}",
-                    b as char
-                ),
+                reason: format!("invalid base32 character '{}' at position {i}", b as char),
             })?;
             st.bits = (st.bits << 5) | v as u32;
             st.count += 5;
@@ -314,7 +312,9 @@ mod tests {
         let ctx = NullExecutionContext;
         let params = json!({});
         let data = b"Hello Base32 streaming test with 5-byte groups!";
-        let whole = Base32Encode.apply(Cow::Borrowed(data), &params, &ctx).unwrap();
+        let whole = Base32Encode
+            .apply(Cow::Borrowed(data), &params, &ctx)
+            .unwrap();
 
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
@@ -338,7 +338,9 @@ mod tests {
         let ctx = NullExecutionContext;
         let params = json!({});
         let data: Vec<u8> = (0..20).collect();
-        let enc = Base32Encode.apply(Cow::Borrowed(&data), &params, &ctx).unwrap();
+        let enc = Base32Encode
+            .apply(Cow::Borrowed(&data), &params, &ctx)
+            .unwrap();
 
         let whole = Base32Decode.apply(enc.clone(), &params, &ctx).unwrap();
 

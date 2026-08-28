@@ -12,7 +12,10 @@ fn main() {
     // собранных `inventory` в `hexforge-ops` на этапе линковки —
     // ни один встроенный оператор не требует правки этого файла (FR-3.1).
     let registry = hexforge_ops::build_registry();
-    eprintln!("[hexforge-core] initialized with {} operations", registry.len());
+    eprintln!(
+        "[hexforge-core] initialized with {} operations",
+        registry.len()
+    );
 
     // AppState управляется через Arc: async-команда run_node обязана
     // передать владение состоянием в blocking-пул (spawn_blocking требует

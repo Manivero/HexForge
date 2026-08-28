@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 use unicode_normalization::UnicodeNormalization;
 
@@ -39,9 +41,11 @@ impl Transform for UnicodeNormalize {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let form = params.get("form").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "form".into(),
-            reason: "string parameter 'form' (nfc|nfd|nfkc|nfkd) is required".into(),
+        let form = params.get("form").and_then(|v| v.as_str()).ok_or_else(|| {
+            TransformError::InvalidParameter {
+                field: "form".into(),
+                reason: "string parameter 'form' (nfc|nfd|nfkc|nfkd) is required".into(),
+            }
         })?;
         let s = String::from_utf8_lossy(input.as_ref());
         let out = match form {
@@ -99,7 +103,11 @@ mod tests {
     fn invalid_form_rejected() {
         let ctx = NullExecutionContext;
         let err = UnicodeNormalize
-            .apply(Cow::Borrowed(b"x"), &serde_json::json!({"form":"bad"}), &ctx)
+            .apply(
+                Cow::Borrowed(b"x"),
+                &serde_json::json!({"form":"bad"}),
+                &ctx,
+            )
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }

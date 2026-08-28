@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 pub struct RemoveWhitespace;
@@ -23,7 +25,12 @@ impl Transform for RemoveWhitespace {
             memory_cost: MemoryCost::PerChunk,
         }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         let out: Vec<u8> = input
             .as_ref()
             .iter()
@@ -41,7 +48,11 @@ impl Transform for RemoveWhitespace {
         _params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<Vec<u8>, TransformError> {
-        Ok(chunk.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect())
+        Ok(chunk
+            .iter()
+            .copied()
+            .filter(|b| !b.is_ascii_whitespace())
+            .collect())
     }
 }
 
@@ -56,7 +67,11 @@ mod tests {
     fn removes_all_whitespace() {
         let ctx = NullExecutionContext;
         let out = RemoveWhitespace
-            .apply(Cow::Borrowed(b" a b\tc\nd e "), &serde_json::json!({}), &ctx)
+            .apply(
+                Cow::Borrowed(b" a b\tc\nd e "),
+                &serde_json::json!({}),
+                &ctx,
+            )
             .unwrap();
         assert_eq!(out.as_ref(), b"abcde");
     }
@@ -75,11 +90,16 @@ mod tests {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({});
         let data = b"a b\tc\nd e f  g";
-        let whole = RemoveWhitespace.apply(Cow::Borrowed(data), &params, &ctx).unwrap();
+        let whole = RemoveWhitespace
+            .apply(Cow::Borrowed(data), &params, &ctx)
+            .unwrap();
 
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
-        for (i, part) in [b"a b".as_slice(), b"\tc\n", b"d e f", b"  g"].iter().enumerate() {
+        for (i, part) in [b"a b".as_slice(), b"\tc\n", b"d e f", b"  g"]
+            .iter()
+            .enumerate()
+        {
             chunked.extend_from_slice(
                 &RemoveWhitespace
                     .apply_chunk(part, i == 3, &mut state, &params, &ctx)

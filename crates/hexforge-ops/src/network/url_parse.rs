@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 use url::Url;
 
@@ -18,12 +20,23 @@ impl Transform for UrlParse {
         "Network"
     }
     fn capabilities(&self) -> TransformCapabilities {
-        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         let s = String::from_utf8_lossy(input.as_ref());
         let s = s.trim();
-        let url = Url::parse(s).map_err(|e| TransformError::InvalidInput { reason: format!("not a valid URL: {e}") })?;
+        let url = Url::parse(s).map_err(|e| TransformError::InvalidInput {
+            reason: format!("not a valid URL: {e}"),
+        })?;
         let out = serde_json::json!({
             "scheme": url.scheme(),
             "host": url.host_str(),
@@ -34,7 +47,8 @@ impl Transform for UrlParse {
             "username": if url.username().is_empty() { serde_json::Value::Null } else { serde_json::Value::String(url.username().to_string()) },
             "password": url.password().map(|p| serde_json::Value::String(p.to_string())).unwrap_or(serde_json::Value::Null),
         });
-        let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+        let pretty = serde_json::to_string_pretty(&out)
+            .map_err(|e| TransformError::Internal(e.to_string()))?;
         Ok(Cow::Owned(pretty.into_bytes()))
     }
 }
@@ -50,7 +64,9 @@ mod tests {
     fn parse_full_url() {
         let ctx = NullExecutionContext;
         let url = "https://user:pass@example.com:8080/path?q=1#frag";
-        let out = UrlParse.apply(Cow::Borrowed(url.as_bytes()), &serde_json::json!({}), &ctx).unwrap();
+        let out = UrlParse
+            .apply(Cow::Borrowed(url.as_bytes()), &serde_json::json!({}), &ctx)
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
         assert_eq!(v["scheme"], "https");
         assert_eq!(v["host"], "example.com");
@@ -65,7 +81,9 @@ mod tests {
     #[test]
     fn rejects_invalid_url() {
         let ctx = NullExecutionContext;
-        let err = UrlParse.apply(Cow::Borrowed(b"not a url"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err = UrlParse
+            .apply(Cow::Borrowed(b"not a url"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
     }
 }

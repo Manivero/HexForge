@@ -129,11 +129,7 @@ interface DataSlice {
   importRecipe: (sourcePath: string) => Promise<boolean>;
 }
 
-export type AppStore = UiSlice &
-  PaletteSlice &
-  OperationsSlice &
-  GraphSlice &
-  DataSlice;
+export type AppStore = UiSlice & PaletteSlice & OperationsSlice & GraphSlice & DataSlice;
 
 function newNodeId(): string {
   return crypto.randomUUID();
@@ -176,8 +172,7 @@ function scheduleBackendSync(store: AppStore): void {
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- ui ----
   theme: "dark",
-  toggleTheme: () =>
-    set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
+  toggleTheme: () => set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
   locale: "en",
   setLocale: (l) => set({ locale: l }),
 
@@ -259,9 +254,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Контракт типизирует params как unknown; по факту это плоский объект
     // параметров JSON Schema. Не-объект (битый узел) заменяем на patch.
     const current =
-      node.params !== null &&
-      typeof node.params === "object" &&
-      !Array.isArray(node.params)
+      node.params !== null && typeof node.params === "object" && !Array.isArray(node.params)
         ? (node.params as Record<string, unknown>)
         : {};
     const nextParams = { ...current, ...patch };

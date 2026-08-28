@@ -9,15 +9,12 @@ use std::borrow::Cow;
 pub struct XorCipher;
 
 fn key_bytes(params: &serde_json::Value) -> Result<Vec<u8>, TransformError> {
-    let key = params
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            TransformError::InvalidParameter {
-                field: "key".into(),
-                reason: "string parameter 'key' is required (UTF-8, cycled over input)".into(),
-            }
-        })?;
+    let key = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+        TransformError::InvalidParameter {
+            field: "key".into(),
+            reason: "string parameter 'key' is required (UTF-8, cycled over input)".into(),
+        }
+    })?;
     let bytes = key.as_bytes().to_vec();
     if bytes.is_empty() {
         return Err(TransformError::InvalidParameter {
@@ -113,7 +110,9 @@ mod tests {
     fn xor_is_involution() {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({ "key": "секрет" }); // UTF-8 мультибайт
-        let once = XorCipher.apply(Cow::Borrowed(b"Hello"), &params, &ctx).unwrap();
+        let once = XorCipher
+            .apply(Cow::Borrowed(b"Hello"), &params, &ctx)
+            .unwrap();
         assert_ne!(once.as_ref(), b"Hello");
         let twice = XorCipher.apply(once, &params, &ctx).unwrap();
         assert_eq!(twice.as_ref(), b"Hello");
@@ -144,11 +143,7 @@ mod tests {
     fn empty_input_empty_output() {
         let ctx = NullExecutionContext;
         let out = XorCipher
-            .apply(
-                Cow::Borrowed(b""),
-                &serde_json::json!({ "key": "k" }),
-                &ctx,
-            )
+            .apply(Cow::Borrowed(b""), &serde_json::json!({ "key": "k" }), &ctx)
             .unwrap();
         assert!(out.is_empty());
     }

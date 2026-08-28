@@ -96,7 +96,15 @@ export function CommandPalette() {
       closePalette();
     });
     return [...appCommands, ...opCommands];
-  }, [toggleTheme, operations, addOperationNode, closePalette, clearGraph, deleteNode, selectedForDelete]);
+  }, [
+    toggleTheme,
+    operations,
+    addOperationNode,
+    closePalette,
+    clearGraph,
+    deleteNode,
+    selectedForDelete,
+  ]);
 
   const filtered = React.useMemo(() => {
     if (query.trim().length === 0) return allCommands;
@@ -147,9 +155,7 @@ export function CommandPalette() {
                 }}
               >
                 <span>{cmd.label}</span>
-                {cmd.hint && (
-                  <span className="text-2xs text-text-muted">{cmd.hint}</span>
-                )}
+                {cmd.hint && <span className="text-2xs text-text-muted">{cmd.hint}</span>}
               </CommandItem>
             ))}
           </CommandGroup>

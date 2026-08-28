@@ -111,24 +111,24 @@ impl Transform for UrlDecode {
                             reason: format!("truncated % escape at byte {i}"),
                         });
                     }
-                    let hi = (src[i + 1] as char)
-                        .to_digit(16)
-                        .ok_or_else(|| TransformError::InvalidInput {
+                    let hi = (src[i + 1] as char).to_digit(16).ok_or_else(|| {
+                        TransformError::InvalidInput {
                             reason: format!(
                                 "invalid % escape at byte {i}: '{}{}'",
                                 src[i + 1] as char,
                                 src[i + 2] as char
                             ),
-                        })? as u8;
-                    let lo = (src[i + 2] as char)
-                        .to_digit(16)
-                        .ok_or_else(|| TransformError::InvalidInput {
+                        }
+                    })? as u8;
+                    let lo = (src[i + 2] as char).to_digit(16).ok_or_else(|| {
+                        TransformError::InvalidInput {
                             reason: format!(
                                 "invalid % escape at byte {i}: '{}{}'",
                                 src[i + 1] as char,
                                 src[i + 2] as char
                             ),
-                        })? as u8;
+                        }
+                    })? as u8;
                     out.push(hi * 16 + lo);
                     i += 3;
                 }
@@ -154,7 +154,9 @@ mod tests {
     #[test]
     fn encode_unreserved_pass_through() {
         let ctx = NullExecutionContext;
-        let out = UrlEncode.apply(Cow::Borrowed(b"Az09-_.~"), &json!({}), &ctx).unwrap();
+        let out = UrlEncode
+            .apply(Cow::Borrowed(b"Az09-_.~"), &json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), b"Az09-_.~");
     }
 
@@ -185,7 +187,9 @@ mod tests {
     fn decode_truncated_escape_rejected() {
         let ctx = NullExecutionContext;
         for bad in [&b"%2"[..], &b"%"[..]] {
-            let err = UrlDecode.apply(Cow::Borrowed(bad), &json!({}), &ctx).unwrap_err();
+            let err = UrlDecode
+                .apply(Cow::Borrowed(bad), &json!({}), &ctx)
+                .unwrap_err();
             assert!(matches!(err, TransformError::InvalidInput { .. }));
         }
     }
@@ -213,7 +217,9 @@ mod tests {
     #[test]
     fn empty_input_roundtrip() {
         let ctx = NullExecutionContext;
-        let enc = UrlEncode.apply(Cow::Borrowed(b""), &json!({}), &ctx).unwrap();
+        let enc = UrlEncode
+            .apply(Cow::Borrowed(b""), &json!({}), &ctx)
+            .unwrap();
         assert!(enc.is_empty());
         let dec = UrlDecode.apply(enc, &json!({}), &ctx).unwrap();
         assert!(dec.is_empty());

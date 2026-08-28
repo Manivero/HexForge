@@ -50,9 +50,10 @@ impl<'a> Reader<'a> {
         let mut result: u64 = 0;
         let mut shift: u32 = 0;
         loop {
-            let b = *self.data.get(self.pos).ok_or_else(|| {
-                format!("truncated varint at byte {}", self.pos)
-            })?;
+            let b = *self
+                .data
+                .get(self.pos)
+                .ok_or_else(|| format!("truncated varint at byte {}", self.pos))?;
             self.pos += 1;
             result |= ((b & 0x7f) as u64) << shift;
             if b & 0x80 == 0 {
@@ -151,8 +152,9 @@ fn walk(data: &[u8], indent: usize, out: &mut Vec<String>) -> Result<(), Transfo
 
         match wire_type {
             WireType::Varint => {
-                let value =
-                    reader.read_varint().map_err(|e| TransformError::InvalidInput {
+                let value = reader
+                    .read_varint()
+                    .map_err(|e| TransformError::InvalidInput {
                         reason: format!("protobuf walk error at byte {}: {e}", reader.pos),
                     })?;
                 out.push(format!("{pad}field {field_number} ({wire_type}): {value}"));
@@ -180,27 +182,25 @@ fn walk(data: &[u8], indent: usize, out: &mut Vec<String>) -> Result<(), Transfo
                 ));
             }
             WireType::LengthDelimited => {
-                let len =
-                    reader.read_varint().map_err(|e| TransformError::InvalidInput {
+                let len = reader
+                    .read_varint()
+                    .map_err(|e| TransformError::InvalidInput {
                         reason: format!("protobuf walk error at byte {}: {e}", reader.pos),
                     })? as usize;
-                let payload =
-                    reader.read_bytes(len).map_err(|e| TransformError::InvalidInput {
+                let payload = reader
+                    .read_bytes(len)
+                    .map_err(|e| TransformError::InvalidInput {
                         reason: format!("protobuf walk error at byte {}: {e}", reader.pos),
                     })?;
 
                 // Эвристика: печатные ASCII → строка; иначе пробуем nested.
-                if !payload.is_empty()
-                    && payload.iter().all(|&b| (0x20..=0x7e).contains(&b))
-                {
+                if !payload.is_empty() && payload.iter().all(|&b| (0x20..=0x7e).contains(&b)) {
                     out.push(format!(
                         "{pad}field {field_number} (string[{len}]): \"{}\"",
                         String::from_utf8_lossy(payload)
                     ));
                 } else if let Some(nested) = try_parse_nested(payload) {
-                    out.push(format!(
-                        "{pad}field {field_number} (message[{len}]):"
-                    ));
+                    out.push(format!("{pad}field {field_number} (message[{len}]):"));
                     for line in nested {
                         out.push(format!("{pad}  {line}"));
                     }
@@ -302,7 +302,9 @@ mod tests {
         input.extend(field_varint(2, 42));
 
         let ctx = NullExecutionContext;
-        let out = ProtobufDecodeRaw.apply(Cow::Borrowed(&input), &json!({}), &ctx).unwrap();
+        let out = ProtobufDecodeRaw
+            .apply(Cow::Borrowed(&input), &json!({}), &ctx)
+            .unwrap();
         let text = String::from_utf8(out.into_owned()).unwrap();
 
         assert!(text.contains("field 1 (string[5]): \"Alice\""), "{text}");
@@ -335,7 +337,9 @@ mod tests {
         input.extend(encode_varint(17));
         input.extend_from_slice(&[0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c]);
 
-        let out = ProtobufDecodeRaw.apply(Cow::Borrowed(&input), &json!({}), &ctx).unwrap();
+        let out = ProtobufDecodeRaw
+            .apply(Cow::Borrowed(&input), &json!({}), &ctx)
+            .unwrap();
         let text = String::from_utf8(out.into_owned()).unwrap();
         assert!(text.contains("field 1 (fixed32)"), "{text}");
         assert!(text.contains("field 2 (fixed64)"), "{text}");

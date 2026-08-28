@@ -17,10 +17,7 @@ export interface RemoveResult {
  * - дубли ссылок на мост устраняются (Set), самоссылка не создаётся;
  * - узлы, не связанные с удаляемым, остаются байт-в-байт теми же объектами.
  */
-export function removeNode(
-  nodes: Record<string, OperationNodeDto>,
-  id: NodeId,
-): RemoveResult {
+export function removeNode(nodes: Record<string, OperationNodeDto>, id: NodeId): RemoveResult {
   const target = nodes[id];
   if (!target) return { nodes, removed: false };
 

@@ -36,11 +36,7 @@ fn validate_cli_path(path: &str, field: &str) -> Result<(), String> {
 }
 
 /// Ошибки CLI: человекочитаемая строка уходит в stderr / тестовый assert.
-pub fn run_recipe(
-    recipe_path: &str,
-    in_path: &str,
-    out_path: &str,
-) -> Result<RunSummary, String> {
+pub fn run_recipe(recipe_path: &str, in_path: &str, out_path: &str) -> Result<RunSummary, String> {
     validate_cli_path(recipe_path, "recipe")?;
     validate_cli_path(in_path, "input")?;
     validate_cli_path(out_path, "output")?;
@@ -171,8 +167,8 @@ pub fn validate_recipe(recipe_path: &str) -> Result<String, String> {
         .map_err(|e| format!("'{recipe_path}' is not a valid recipe file: {e}"))?;
 
     let registry = hexforge_ops::build_registry();
-    let graph = hexforge_engine::graph_dto::validate_graph(dto, &registry)
-        .map_err(|e| e.message)?;
+    let graph =
+        hexforge_engine::graph_dto::validate_graph(dto, &registry).map_err(|e| e.message)?;
 
     Ok(format!(
         "recipe valid: {} node(s), {} operation(s) in registry",

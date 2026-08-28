@@ -77,8 +77,7 @@ impl Graph {
     /// Возвращает `GraphError::CycleDetected`, если граф не является DAG,
     /// и `GraphError::DanglingInput`, если узел ссылается на несуществующий вход.
     pub fn topo_order(&self) -> Result<Vec<NodeId>, GraphError> {
-        let mut in_degree: HashMap<NodeId, usize> =
-            self.nodes.keys().map(|id| (*id, 0)).collect();
+        let mut in_degree: HashMap<NodeId, usize> = self.nodes.keys().map(|id| (*id, 0)).collect();
 
         for node in self.nodes.values() {
             for input in &node.inputs {

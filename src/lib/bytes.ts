@@ -5,9 +5,7 @@
 /** Байты в hex-дамп с пробелами: "de ad be ef". */
 export function toHexDump(bytes: Uint8Array, limit = 4096): string {
   const end = Math.min(bytes.length, limit);
-  return Array.from(bytes.subarray(0, end), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join(" ");
+  return Array.from(bytes.subarray(0, end), (byte) => byte.toString(16).padStart(2, "0")).join(" ");
 }
 
 /** Байты в строку с lossy-декодированием UTF-8 (некорректные байты → U+FFFD). */

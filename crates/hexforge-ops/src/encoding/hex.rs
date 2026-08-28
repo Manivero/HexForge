@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 pub struct HexEncode;
@@ -159,7 +161,9 @@ mod tests {
     fn decode_ignores_whitespace_noise() {
         let input: ByteView = Cow::Borrowed(b"de ad be ef\n");
         let ctx = NullExecutionContext;
-        let decoded = HexDecode.apply(input, &serde_json::json!({}), &ctx).unwrap();
+        let decoded = HexDecode
+            .apply(input, &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(decoded.as_ref(), &[0xDE, 0xAD, 0xBE, 0xEF]);
     }
 
@@ -207,13 +211,17 @@ mod tests {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({});
 
-        let whole = HexEncode.apply(Cow::Borrowed(b"deadbeef"), &params, &ctx).unwrap();
+        let whole = HexEncode
+            .apply(Cow::Borrowed(b"deadbeef"), &params, &ctx)
+            .unwrap();
 
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
         for (i, part) in [b"de".as_slice(), b"ad", b"be", b"ef"].iter().enumerate() {
             chunked.extend_from_slice(
-                &HexEncode.apply_chunk(part, i == 3, &mut state, &params, &ctx).unwrap(),
+                &HexEncode
+                    .apply_chunk(part, i == 3, &mut state, &params, &ctx)
+                    .unwrap(),
             );
         }
         assert_eq!(whole.as_ref(), chunked.as_slice());

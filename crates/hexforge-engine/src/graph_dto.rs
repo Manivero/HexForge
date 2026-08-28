@@ -58,7 +58,10 @@ fn parse_uuid(raw: &str) -> Result<NodeId, HexForgeError> {
 /// Структурно-семантическая валидация рецепта/графа против реестра:
 /// UUID'ы, DAG и воспроизводимость операций (наличие + точная версия, FR-4.2).
 /// Возвращает доменный граф для дальнейшего исполнения.
-pub fn validate_graph(dto: GraphDto, registry: &hexforge_core::TransformRegistry) -> HexForgeResult<Graph> {
+pub fn validate_graph(
+    dto: GraphDto,
+    registry: &hexforge_core::TransformRegistry,
+) -> HexForgeResult<Graph> {
     let graph: Graph = dto.try_into()?;
     graph.topo_order().map_err(HexForgeError::from)?;
 

@@ -3,7 +3,9 @@ use base64::{
     engine::{general_purpose, GeneralPurpose},
     Engine as _,
 };
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 fn engine_for(params: &serde_json::Value) -> Result<Cow<'static, GeneralPurpose>, TransformError> {
@@ -15,7 +17,8 @@ fn engine_for(params: &serde_json::Value) -> Result<Cow<'static, GeneralPurpose>
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| TransformError::InvalidParameter {
                     field: "custom_alphabet".into(),
-                    reason: "custom alphabet required when alphabet='custom' (64-char string)".into(),
+                    reason: "custom alphabet required when alphabet='custom' (64-char string)"
+                        .into(),
                 })?;
             if custom.len() != 64 {
                 return Err(TransformError::InvalidParameter {
@@ -27,7 +30,10 @@ fn engine_for(params: &serde_json::Value) -> Result<Cow<'static, GeneralPurpose>
                 field: "custom_alphabet".into(),
                 reason: format!("invalid alphabet: {e}"),
             })?;
-            Ok(Cow::Owned(GeneralPurpose::new(&alphabet, general_purpose::PAD)))
+            Ok(Cow::Owned(GeneralPurpose::new(
+                &alphabet,
+                general_purpose::PAD,
+            )))
         }
         _ => Ok(Cow::Borrowed(&general_purpose::STANDARD)),
     }
@@ -98,7 +104,9 @@ impl Transform for Base64Encode {
         if state.downcast_ref::<Base64EncodeState>().is_none() {
             *state = Box::new(Base64EncodeState::default());
         }
-        let st = state.downcast_mut::<Base64EncodeState>().expect("Base64EncodeState seeded");
+        let st = state
+            .downcast_mut::<Base64EncodeState>()
+            .expect("Base64EncodeState seeded");
         let engine = engine_for(params)?;
 
         // Combine leftover from previous chunk with new chunk
@@ -209,7 +217,9 @@ impl Transform for Base64Decode {
         if state.downcast_ref::<Base64DecodeState>().is_none() {
             *state = Box::new(Base64DecodeState::default());
         }
-        let st = state.downcast_mut::<Base64DecodeState>().expect("Base64DecodeState seeded");
+        let st = state
+            .downcast_mut::<Base64DecodeState>()
+            .expect("Base64DecodeState seeded");
         let engine = engine_for(params)?;
 
         // Filter whitespace from chunk, keep base64 chars and padding
@@ -244,9 +254,11 @@ impl Transform for Base64Decode {
             if to_decode.contains('=') {
                 break;
             }
-            let decoded = engine.decode(to_decode).map_err(|e| TransformError::InvalidInput {
-                reason: format!("not valid base64: {e}"),
-            })?;
+            let decoded = engine
+                .decode(to_decode)
+                .map_err(|e| TransformError::InvalidInput {
+                    reason: format!("not valid base64: {e}"),
+                })?;
             out.extend_from_slice(&decoded);
             st.leftover.drain(..4);
         }
@@ -274,9 +286,11 @@ impl Transform for Base64Decode {
                     while padded.len() % 4 != 0 {
                         padded.push('=');
                     }
-                    engine.decode(&padded).map_err(|e| TransformError::InvalidInput {
-                        reason: format!("not valid base64: {e}"),
-                    })?
+                    engine
+                        .decode(&padded)
+                        .map_err(|e| TransformError::InvalidInput {
+                            reason: format!("not valid base64: {e}"),
+                        })?
                 }
             };
             out.extend_from_slice(&decoded);
@@ -340,7 +354,9 @@ mod tests {
         let input = b"Hello HexForge streaming base64 test with 64MiB chunks!";
         let params = serde_json::json!({ "alphabet": "standard" });
         let ctx = NullExecutionContext;
-        let whole = Base64Encode.apply(Cow::Borrowed(input), &params, &ctx).unwrap();
+        let whole = Base64Encode
+            .apply(Cow::Borrowed(input), &params, &ctx)
+            .unwrap();
 
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
@@ -364,7 +380,9 @@ mod tests {
         let params = serde_json::json!({ "alphabet": "standard" });
         let ctx = NullExecutionContext;
         let original = b"Hello streaming decode!";
-        let encoded = Base64Encode.apply(Cow::Borrowed(original), &params, &ctx).unwrap();
+        let encoded = Base64Encode
+            .apply(Cow::Borrowed(original), &params, &ctx)
+            .unwrap();
 
         let whole = Base64Decode.apply(encoded.clone(), &params, &ctx).unwrap();
 
@@ -404,7 +422,9 @@ mod tests {
         let params = serde_json::json!({ "alphabet": "standard" });
         let ctx = NullExecutionContext;
         let data: Vec<u8> = (0..255).collect();
-        let encoded = Base64Encode.apply(Cow::Borrowed(&data), &params, &ctx).unwrap();
+        let encoded = Base64Encode
+            .apply(Cow::Borrowed(&data), &params, &ctx)
+            .unwrap();
         let mut state_enc: Box<dyn std::any::Any + Send> = Box::new(());
         let mut state_dec: Box<dyn std::any::Any + Send> = Box::new(());
         // Encode in random 1..10 byte chunks, decode in random 1..8 char chunks
@@ -429,7 +449,13 @@ mod tests {
             let is_last = off2 + sz == chunked_enc.len();
             decoded.extend_from_slice(
                 &Base64Decode
-                    .apply_chunk(&chunked_enc[off2..off2 + sz], is_last, &mut state_dec, &params, &ctx)
+                    .apply_chunk(
+                        &chunked_enc[off2..off2 + sz],
+                        is_last,
+                        &mut state_dec,
+                        &params,
+                        &ctx,
+                    )
                     .unwrap(),
             );
             off2 += sz;

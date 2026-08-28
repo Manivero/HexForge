@@ -83,7 +83,9 @@ mod tests {
     fn empty_input_known_vector() {
         // BLAKE3("") = af1349b9f5f9a1a6a0404dea36dcc949...
         let ctx = NullExecutionContext;
-        let out = Blake3Hash.apply(Cow::Borrowed(b""), &json!({}), &ctx).unwrap();
+        let out = Blake3Hash
+            .apply(Cow::Borrowed(b""), &json!({}), &ctx)
+            .unwrap();
         assert_eq!(
             out.as_ref(),
             b"af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"

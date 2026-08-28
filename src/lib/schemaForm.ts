@@ -33,10 +33,7 @@ export function extractFields(schema: unknown): SchemaField[] {
     const def = rawDef as Record<string, unknown>;
     const rawType = def.type;
     const type =
-      rawType === "string" ||
-      rawType === "boolean" ||
-      rawType === "integer" ||
-      rawType === "number"
+      rawType === "string" || rawType === "boolean" || rawType === "integer" || rawType === "number"
         ? rawType
         : "other";
     fields.push({

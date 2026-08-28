@@ -93,7 +93,11 @@ body {
   margin: 0;
   background: var(--surface-0);
   color: var(--text-primary);
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   font-size: 14px;
   /* Плотный UI, не consumer-app: подавляем стандартное сглаживание "жирного" текста macOS */
   -webkit-font-smoothing: antialiased;

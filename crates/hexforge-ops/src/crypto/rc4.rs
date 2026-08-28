@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 #[allow(clippy::needless_range_loop)]
@@ -63,14 +65,22 @@ impl Transform for Rc4 {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let key_str = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "key".into(),
-            reason: "string parameter 'key' is required".into(),
+        let key_str = params.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
+            TransformError::InvalidParameter {
+                field: "key".into(),
+                reason: "string parameter 'key' is required".into(),
+            }
         })?;
         if key_str.is_empty() {
-            return Err(TransformError::InvalidParameter { field: "key".into(), reason: "key must not be empty".into() });
+            return Err(TransformError::InvalidParameter {
+                field: "key".into(),
+                reason: "key must not be empty".into(),
+            });
         }
-        let hex_key = params.get("hexKey").and_then(|v| v.as_bool()).unwrap_or(false);
+        let hex_key = params
+            .get("hexKey")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let key_bytes = if hex_key {
             let clean: String = key_str.chars().filter(|c| !c.is_whitespace()).collect();
             hex::decode(&clean).map_err(|e| TransformError::InvalidParameter {
@@ -81,7 +91,10 @@ impl Transform for Rc4 {
             key_str.as_bytes().to_vec()
         };
         if key_bytes.is_empty() {
-            return Err(TransformError::InvalidParameter { field: "key".into(), reason: "decoded key is empty".into() });
+            return Err(TransformError::InvalidParameter {
+                field: "key".into(),
+                reason: "decoded key is empty".into(),
+            });
         }
         Ok(Cow::Owned(rc4(&key_bytes, input.as_ref())))
     }
@@ -112,7 +125,9 @@ mod tests {
     fn rc4_is_involution() {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({"key": "secret"});
-        let enc = Rc4.apply(Cow::Borrowed(b"Hello HexForge"), &params, &ctx).unwrap();
+        let enc = Rc4
+            .apply(Cow::Borrowed(b"Hello HexForge"), &params, &ctx)
+            .unwrap();
         let dec = Rc4.apply(enc, &params, &ctx).unwrap();
         assert_eq!(dec.as_ref(), b"Hello HexForge");
     }
@@ -134,7 +149,9 @@ mod tests {
     #[test]
     fn empty_key_rejected() {
         let ctx = NullExecutionContext;
-        let err = Rc4.apply(Cow::Borrowed(b"x"), &serde_json::json!({"key": ""}), &ctx).unwrap_err();
+        let err = Rc4
+            .apply(Cow::Borrowed(b"x"), &serde_json::json!({"key": ""}), &ctx)
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }
 }

@@ -1,5 +1,7 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 pub struct JwtDecode;
@@ -41,23 +43,28 @@ impl Transform for JwtDecode {
         let header_json = decode_b64_json(parts[0], "header")?;
         let payload_json = decode_b64_json(parts[1], "payload")?;
         // Signature stays as-is (base64url); we just verify it is valid base64url
-        URL_SAFE_NO_PAD.decode(parts[2]).map_err(|e| TransformError::InvalidInput {
-            reason: format!("invalid JWT signature base64url: {e}"),
-        })?;
+        URL_SAFE_NO_PAD
+            .decode(parts[2])
+            .map_err(|e| TransformError::InvalidInput {
+                reason: format!("invalid JWT signature base64url: {e}"),
+            })?;
         let out = serde_json::json!({
             "header": header_json,
             "payload": payload_json,
             "signature": parts[2]
         });
-        let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+        let pretty = serde_json::to_string_pretty(&out)
+            .map_err(|e| TransformError::Internal(e.to_string()))?;
         Ok(Cow::Owned(pretty.into_bytes()))
     }
 }
 
 fn decode_b64_json(part: &str, name: &str) -> Result<serde_json::Value, TransformError> {
-    let bytes = URL_SAFE_NO_PAD.decode(part).map_err(|e| TransformError::InvalidInput {
-        reason: format!("invalid JWT {name} base64url: {e}"),
-    })?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(part)
+        .map_err(|e| TransformError::InvalidInput {
+            reason: format!("invalid JWT {name} base64url: {e}"),
+        })?;
     serde_json::from_slice(&bytes).map_err(|e| TransformError::InvalidInput {
         reason: format!("invalid JWT {name} JSON: {e}"),
     })
@@ -78,7 +85,9 @@ mod tests {
         // Use a real token: header eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 payload eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ signature SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
         let real = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
         let ctx = NullExecutionContext;
-        let out = JwtDecode.apply(Cow::Borrowed(real.as_bytes()), &serde_json::json!({}), &ctx).unwrap();
+        let out = JwtDecode
+            .apply(Cow::Borrowed(real.as_bytes()), &serde_json::json!({}), &ctx)
+            .unwrap();
         let text = String::from_utf8(out.into_owned()).unwrap();
         assert!(text.contains("\"sub\""));
         assert!(text.contains("1234567890"));
@@ -91,9 +100,21 @@ mod tests {
     #[test]
     fn rejects_invalid_jwt() {
         let ctx = NullExecutionContext;
-        let err = JwtDecode.apply(Cow::Borrowed(b"not.a.jwt.at.all.extra"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err = JwtDecode
+            .apply(
+                Cow::Borrowed(b"not.a.jwt.at.all.extra"),
+                &serde_json::json!({}),
+                &ctx,
+            )
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
-        let err2 = JwtDecode.apply(Cow::Borrowed(b"only.two.parts"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err2 = JwtDecode
+            .apply(
+                Cow::Borrowed(b"only.two.parts"),
+                &serde_json::json!({}),
+                &ctx,
+            )
+            .unwrap_err();
         assert!(matches!(err2, TransformError::InvalidInput { .. }));
     }
 }

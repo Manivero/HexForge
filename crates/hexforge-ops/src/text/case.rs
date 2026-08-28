@@ -48,13 +48,12 @@ impl Transform for CaseTransform {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let mode = params
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| TransformError::InvalidParameter {
+        let mode = params.get("mode").and_then(|v| v.as_str()).ok_or_else(|| {
+            TransformError::InvalidParameter {
                 field: "mode".into(),
                 reason: "string parameter 'mode' (upper|lower|title) is required".into(),
-            })?;
+            }
+        })?;
 
         let out: Vec<u8> = match mode {
             "upper" => input.iter().map(|&b| b.to_ascii_uppercase()).collect(),
@@ -101,7 +100,11 @@ mod tests {
     fn upper_mode() {
         let ctx = NullExecutionContext;
         let out = CaseTransform
-            .apply(Cow::Borrowed(b"Hello World"), &serde_json::json!({"mode":"upper"}), &ctx)
+            .apply(
+                Cow::Borrowed(b"Hello World"),
+                &serde_json::json!({"mode":"upper"}),
+                &ctx,
+            )
             .unwrap();
         assert_eq!(out.as_ref(), b"HELLO WORLD");
     }
@@ -110,7 +113,11 @@ mod tests {
     fn lower_mode() {
         let ctx = NullExecutionContext;
         let out = CaseTransform
-            .apply(Cow::Borrowed(b"Hello World"), &serde_json::json!({"mode":"lower"}), &ctx)
+            .apply(
+                Cow::Borrowed(b"Hello World"),
+                &serde_json::json!({"mode":"lower"}),
+                &ctx,
+            )
             .unwrap();
         assert_eq!(out.as_ref(), b"hello world");
     }
@@ -145,7 +152,11 @@ mod tests {
     fn non_letters_pass_through() {
         let ctx = NullExecutionContext;
         let out = CaseTransform
-            .apply(Cow::Borrowed(b"a1.B_c"), &serde_json::json!({"mode":"upper"}), &ctx)
+            .apply(
+                Cow::Borrowed(b"a1.B_c"),
+                &serde_json::json!({"mode":"upper"}),
+                &ctx,
+            )
             .unwrap();
         assert_eq!(out.as_ref(), b"A1.B_C");
     }
@@ -154,7 +165,11 @@ mod tests {
     fn unknown_mode_rejected() {
         let ctx = NullExecutionContext;
         let err = CaseTransform
-            .apply(Cow::Borrowed(b"x"), &serde_json::json!({"mode":"shout"}), &ctx)
+            .apply(
+                Cow::Borrowed(b"x"),
+                &serde_json::json!({"mode":"shout"}),
+                &ctx,
+            )
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }

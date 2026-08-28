@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -16,7 +18,11 @@ fn b58_value(c: u8) -> Option<u8> {
     };
     if (c as usize) < 128 {
         let v = TABLE[c as usize];
-        if v >= 0 { Some(v as u8) } else { None }
+        if v >= 0 {
+            Some(v as u8)
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -54,7 +60,11 @@ fn encode_base58(data: &[u8]) -> Vec<u8> {
 
 fn decode_base58(s: &[u8]) -> Result<Vec<u8>, TransformError> {
     // Strip whitespace
-    let filtered: Vec<u8> = s.iter().copied().filter(|b| !b.is_ascii_whitespace()).collect();
+    let filtered: Vec<u8> = s
+        .iter()
+        .copied()
+        .filter(|b| !b.is_ascii_whitespace())
+        .collect();
     if filtered.is_empty() {
         return Ok(vec![]);
     }
@@ -159,22 +169,38 @@ mod tests {
     fn known_vectors() {
         let ctx = NullExecutionContext;
         // Bitcoin base58 vector: Hello World
-        let out = Base58Encode.apply(Cow::Borrowed(b"Hello World"), &serde_json::json!({}), &ctx).unwrap();
+        let out = Base58Encode
+            .apply(Cow::Borrowed(b"Hello World"), &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), b"JxF12TrwUP45BMd");
-        let dec = Base58Decode.apply(out, &serde_json::json!({}), &ctx).unwrap();
+        let dec = Base58Decode
+            .apply(out, &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), b"Hello World");
 
         // Empty
-        let out = Base58Encode.apply(Cow::Borrowed(b""), &serde_json::json!({}), &ctx).unwrap();
+        let out = Base58Encode
+            .apply(Cow::Borrowed(b""), &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), b"");
-        let dec = Base58Decode.apply(out, &serde_json::json!({}), &ctx).unwrap();
+        let dec = Base58Decode
+            .apply(out, &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), b"");
 
         // Leading zeros → '1' prefix and roundtrip
         let plain = b"\x00\x00Hello";
-        let enc = Base58Encode.apply(Cow::Borrowed(plain), &serde_json::json!({}), &ctx).unwrap();
-        assert!(enc.starts_with(b"11"), "leading zeros must become '1's, got {}", String::from_utf8_lossy(&enc));
-        let dec = Base58Decode.apply(enc, &serde_json::json!({}), &ctx).unwrap();
+        let enc = Base58Encode
+            .apply(Cow::Borrowed(plain), &serde_json::json!({}), &ctx)
+            .unwrap();
+        assert!(
+            enc.starts_with(b"11"),
+            "leading zeros must become '1's, got {}",
+            String::from_utf8_lossy(&enc)
+        );
+        let dec = Base58Decode
+            .apply(enc, &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), plain.as_slice());
     }
 
@@ -183,8 +209,12 @@ mod tests {
         let ctx = NullExecutionContext;
         for len in 0..32 {
             let data: Vec<u8> = (0..len).map(|i| (i * 37 + 13) as u8).collect();
-            let enc = Base58Encode.apply(Cow::Borrowed(&data), &serde_json::json!({}), &ctx).unwrap();
-            let dec = Base58Decode.apply(enc, &serde_json::json!({}), &ctx).unwrap();
+            let enc = Base58Encode
+                .apply(Cow::Borrowed(&data), &serde_json::json!({}), &ctx)
+                .unwrap();
+            let dec = Base58Decode
+                .apply(enc, &serde_json::json!({}), &ctx)
+                .unwrap();
             assert_eq!(dec.as_ref(), data.as_slice(), "len {len}");
         }
     }
@@ -201,10 +231,14 @@ mod tests {
     #[test]
     fn whitespace_ignored() {
         let ctx = NullExecutionContext;
-        let enc = Base58Encode.apply(Cow::Borrowed(b"Hello"), &serde_json::json!({}), &ctx).unwrap();
+        let enc = Base58Encode
+            .apply(Cow::Borrowed(b"Hello"), &serde_json::json!({}), &ctx)
+            .unwrap();
         // Insert whitespace and decode
         let spaced = [enc.as_ref(), b"  \n "].concat();
-        let dec = Base58Decode.apply(Cow::Borrowed(&spaced), &serde_json::json!({}), &ctx).unwrap();
+        let dec = Base58Decode
+            .apply(Cow::Borrowed(&spaced), &serde_json::json!({}), &ctx)
+            .unwrap();
         assert_eq!(dec.as_ref(), b"Hello");
     }
 }

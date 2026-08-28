@@ -170,7 +170,9 @@ mod tests {
         let ctx = NullExecutionContext;
         let input = br#"<script>alert("xss")</script>&'"#;
         let expected = br#"&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;&amp;&#39;"#;
-        let out = HtmlEncode.apply(Cow::Borrowed(input), &json!({}), &ctx).unwrap();
+        let out = HtmlEncode
+            .apply(Cow::Borrowed(input), &json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), &expected[..]);
     }
 
@@ -224,7 +226,9 @@ mod tests {
     #[test]
     fn empty_input() {
         let ctx = NullExecutionContext;
-        let e = HtmlEncode.apply(Cow::Borrowed(b""), &json!({}), &ctx).unwrap();
+        let e = HtmlEncode
+            .apply(Cow::Borrowed(b""), &json!({}), &ctx)
+            .unwrap();
         assert!(e.is_empty());
         let d = HtmlDecode.apply(e, &json!({}), &ctx).unwrap();
         assert!(d.is_empty());

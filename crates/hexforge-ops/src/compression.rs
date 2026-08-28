@@ -3,9 +3,13 @@
 
 use bzip2::read::{BzDecoder, BzEncoder};
 use bzip2::Compression as BzCompression;
-use flate2::read::{DeflateDecoder, DeflateEncoder, GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder};
+use flate2::read::{
+    DeflateDecoder, DeflateEncoder, GzDecoder, GzEncoder, ZlibDecoder, ZlibEncoder,
+};
 use flate2::Compression;
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 use std::io::Read;
 use xz2::read::{XzDecoder, XzEncoder};
@@ -31,10 +35,7 @@ fn decompress_bytes(decoder: &mut dyn Read) -> Result<Vec<u8>, TransformError> {
 }
 
 fn level_from_params(params: &serde_json::Value) -> Compression {
-    let lvl = params
-        .get("level")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(6);
+    let lvl = params.get("level").and_then(|v| v.as_u64()).unwrap_or(6);
     // flate2 level 0..=9; clamp to valid range
     Compression::new((lvl.min(9)) as u32)
 }
@@ -303,7 +304,11 @@ impl Transform for Bzip2Compress {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let lvl = params.get("level").and_then(|v| v.as_u64()).unwrap_or(6).clamp(1, 9) as u32;
+        let lvl = params
+            .get("level")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(6)
+            .clamp(1, 9) as u32;
         let mut enc = BzEncoder::new(input.as_ref(), BzCompression::new(lvl));
         Ok(Cow::Owned(compress_bytes(&mut enc)?))
     }
@@ -366,10 +371,23 @@ impl Transform for LzmaCompress {
         })
     }
     fn capabilities(&self) -> TransformCapabilities {
-        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
-        let lvl = params.get("level").and_then(|v| v.as_u64()).unwrap_or(6).clamp(0, 9) as u32;
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
+        let lvl = params
+            .get("level")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(6)
+            .clamp(0, 9) as u32;
         let mut enc = XzEncoder::new(input.as_ref(), lvl);
         Ok(Cow::Owned(compress_bytes(&mut enc)?))
     }
@@ -391,9 +409,18 @@ impl Transform for LzmaDecompress {
         "Compression"
     }
     fn capabilities(&self) -> TransformCapabilities {
-        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         let mut dec = XzDecoder::new(input.as_ref());
         Ok(Cow::Owned(decompress_bytes(&mut dec)?))
     }
@@ -419,7 +446,11 @@ mod tests {
         let ctx = NullExecutionContext;
         let params = serde_json::json!({});
         let enc = compress.apply(Cow::Borrowed(data), &params, &ctx).unwrap();
-        assert_ne!(enc.as_ref(), data, "compressed must differ for non-empty input");
+        assert_ne!(
+            enc.as_ref(),
+            data,
+            "compressed must differ for non-empty input"
+        );
         let dec = decompress.apply(enc, &params, &ctx).unwrap();
         assert_eq!(dec.as_ref(), data);
     }
@@ -440,7 +471,11 @@ mod tests {
 
     #[test]
     fn deflate_roundtrip() {
-        roundtrip(&DeflateCompress, &DeflateDecompress, b"deflate test payload 123");
+        roundtrip(
+            &DeflateCompress,
+            &DeflateDecompress,
+            b"deflate test payload 123",
+        );
     }
 
     #[test]
@@ -464,7 +499,9 @@ mod tests {
             let enc = GzipCompress
                 .apply(Cow::Borrowed(b"level test"), &params, &ctx)
                 .unwrap();
-            let dec = GzipDecompress.apply(enc, &serde_json::json!({}), &ctx).unwrap();
+            let dec = GzipDecompress
+                .apply(enc, &serde_json::json!({}), &ctx)
+                .unwrap();
             assert_eq!(dec.as_ref(), b"level test");
         }
     }
@@ -479,7 +516,11 @@ mod tests {
 
     #[test]
     fn lzma_roundtrip() {
-        roundtrip(&LzmaCompress, &LzmaDecompress, b"lzma payload test for HexForge");
+        roundtrip(
+            &LzmaCompress,
+            &LzmaDecompress,
+            b"lzma payload test for HexForge",
+        );
         roundtrip(&LzmaCompress, &LzmaDecompress, b"");
         let big = vec![b'Y'; 50_000];
         roundtrip(&LzmaCompress, &LzmaDecompress, &big);

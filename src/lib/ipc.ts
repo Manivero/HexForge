@@ -45,12 +45,7 @@ async function call<T>(command: string, payload?: Record<string, unknown>): Prom
 }
 
 function isHexForgeError(value: unknown): value is HexForgeError {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    "message" in value
-  );
+  return typeof value === "object" && value !== null && "kind" in value && "message" in value;
 }
 
 export function greet(name: string): Promise<string> {
@@ -107,7 +102,9 @@ export function diffSnapshots(req: DiffSnapshotsRequest): Promise<DiffSnapshotsR
   return call<DiffSnapshotsResponse>("diff_snapshots", { req });
 }
 
-export function importCyberChefRecipe(req: ImportCyberChefRecipeRequest): Promise<ImportCyberChefRecipeResponse> {
+export function importCyberChefRecipe(
+  req: ImportCyberChefRecipeRequest,
+): Promise<ImportCyberChefRecipeResponse> {
   return call<ImportCyberChefRecipeResponse>("import_cyberchef_recipe", { req });
 }
 

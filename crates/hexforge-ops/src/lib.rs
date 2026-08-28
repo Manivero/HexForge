@@ -6,9 +6,9 @@
 //! ("ядро ничего не знает о конкретных операциях") и требования расти
 //! до 400+ операций без узкого места в одном файле.
 
+pub mod binary;
 pub mod compression;
 pub mod crypto;
-pub mod binary;
 pub mod encoding;
 pub mod hashing;
 pub mod network;
@@ -52,7 +52,11 @@ mod tests {
     fn registry_contains_all_builtin_operations() {
         let registry = build_registry();
         // На момент MVP: base64 encode/decode, hex encode/decode, rot13, md5, sha256.
-        assert!(registry.len() >= 6, "expected at least 6 built-in operations, got {}", registry.len());
+        assert!(
+            registry.len() >= 6,
+            "expected at least 6 built-in operations, got {}",
+            registry.len()
+        );
         assert!(registry.get("encoding.base64.decode").is_some());
         assert!(registry.get("hashing.sha256").is_some());
     }

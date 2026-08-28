@@ -57,9 +57,12 @@ fn run_recipe_rot13_then_base64_end_to_end() {
     let input = write(&dir, "in.bin", b"Hello");
     let out = dir.join("out.bin");
 
-    let summary =
-        hexforge_cli::run_recipe(recipe.to_str().unwrap(), input.to_str().unwrap(), out.to_str().unwrap())
-            .expect("recipe must run");
+    let summary = hexforge_cli::run_recipe(
+        recipe.to_str().unwrap(),
+        input.to_str().unwrap(),
+        out.to_str().unwrap(),
+    )
+    .expect("recipe must run");
 
     // rot13("Hello") = "Uryyb" (5 байт) → base64 = 8 символов.
     assert_eq!(summary.output_bytes, 8);

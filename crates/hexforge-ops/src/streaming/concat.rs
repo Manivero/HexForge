@@ -40,7 +40,8 @@ impl Transform for ConcatMerge {
         // как N-арная (планировщик вызывает apply_merge). Ошибка намеренно
         // диагностическая — попадание сюда означает баг вызова.
         Err(TransformError::Internal(
-            "streaming.concat is a merge operation; it is executed via apply_merge with N inputs".into(),
+            "streaming.concat is a merge operation; it is executed via apply_merge with N inputs"
+                .into(),
         ))
     }
 }

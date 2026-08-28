@@ -20,9 +20,7 @@ export function PreviewDock() {
   const runningNodeId = useAppStore((s) => s.runningNodeId);
   const previewText = useAppStore((s) => s.previewText);
   const previewTruncated = useAppStore((s) => s.previewTruncated);
-  const isStale = useAppStore(
-    (s) => s.lastRun !== null && s.ranAtGraphVersion !== s.graphVersion,
-  );
+  const isStale = useAppStore((s) => s.lastRun !== null && s.ranAtGraphVersion !== s.graphVersion);
 
   // Hex-пагинация: страница грузится лениво при входе в режим/смене offset.
   const hexOffset = useAppStore((s) => s.hexOffset);
@@ -40,12 +38,7 @@ export function PreviewDock() {
   };
 
   React.useEffect(() => {
-    if (
-      mode === "hex" &&
-      lastRun !== null &&
-      hexBytes === null &&
-      !hexLoading
-    ) {
+    if (mode === "hex" && lastRun !== null && hexBytes === null && !hexLoading) {
       void loadHexPage(hexOffset ?? 0);
     }
   }, [mode, lastRun, hexBytes, hexLoading, hexOffset, loadHexPage]);
@@ -185,9 +178,7 @@ export function PreviewDock() {
           >
             {buildHexRows(hexBytes, offsetNow).map((row) => (
               <div key={row.addr} className="whitespace-pre">
-                <span className="text-text-muted">
-                  {formatAddr(row.addr).slice(2)}
-                </span>
+                <span className="text-text-muted">{formatAddr(row.addr).slice(2)}</span>
                 {"  "}
                 {row.hex}
                 {"  "}

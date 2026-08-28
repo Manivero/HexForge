@@ -49,14 +49,18 @@ mod tests {
     #[test]
     fn reverse_basic() {
         let ctx = NullExecutionContext;
-        let out = Reverse.apply(Cow::Borrowed(b"abc"), &json!({}), &ctx).unwrap();
+        let out = Reverse
+            .apply(Cow::Borrowed(b"abc"), &json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), b"cba");
     }
 
     #[test]
     fn reverse_twice_is_identity() {
         let ctx = NullExecutionContext;
-        let once = Reverse.apply(Cow::Borrowed(b"hello"), &json!({}), &ctx).unwrap();
+        let once = Reverse
+            .apply(Cow::Borrowed(b"hello"), &json!({}), &ctx)
+            .unwrap();
         let twice = Reverse.apply(once, &json!({}), &ctx).unwrap();
         assert_eq!(twice.as_ref(), b"hello");
     }

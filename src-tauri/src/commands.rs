@@ -3,12 +3,12 @@
 //! (см. `05-IPC-CONTRACT.md`). `#[serde(rename_all = "camelCase")]`
 //! обеспечивает совпадение имён полей с TS без ручного маппинга.
 
-use hexforge_engine::graph_dto::GraphDto;
-use hexforge_engine::error::{HexForgeError, HexForgeResult};
-use hexforge_engine::scheduler;
-use hexforge_engine::state::{AppState, SourceEntry, WriteRegionError};
 use base64::{engine::general_purpose, Engine as _};
 use hexforge_core::graph::Graph;
+use hexforge_engine::error::{HexForgeError, HexForgeResult};
+use hexforge_engine::graph_dto::GraphDto;
+use hexforge_engine::scheduler;
+use hexforge_engine::state::{AppState, SourceEntry, WriteRegionError};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,7 +65,6 @@ pub fn list_operations(state: State<Arc<AppState>>) -> Vec<OperationDescriptor> 
         .collect();
     sort_for_palette(&mut descriptors);
     descriptors
-
 }
 
 // ---------- Источники данных ----------
@@ -90,9 +89,8 @@ pub fn open_file(
     state: State<Arc<AppState>>,
 ) -> HexForgeResult<OpenFileResponse> {
     validate_fs_path(&req.path, "path")?;
-    let file = std::fs::File::open(&req.path).map_err(|e| {
-        HexForgeError::invalid_input(format!("cannot open '{}': {e}", req.path))
-    })?;
+    let file = std::fs::File::open(&req.path)
+        .map_err(|e| HexForgeError::invalid_input(format!("cannot open '{}': {e}", req.path)))?;
 
     // SAFETY: memmap2::Mmap::map is unsafe because the OS gives no guarantee
     // the backing file won't be truncated/modified by another process while
@@ -204,9 +202,9 @@ pub fn preview_bytes(
 ) -> HexForgeResult<PreviewBytesResponse> {
     let handle = parse_handle(&req.handle)?;
     let sources = state.sources.read();
-    let entry = sources
-        .get(&handle)
-        .ok_or_else(|| HexForgeError::invalid_input(format!("unknown source handle: {}", req.handle)))?;
+    let entry = sources.get(&handle).ok_or_else(|| {
+        HexForgeError::invalid_input(format!("unknown source handle: {}", req.handle))
+    })?;
 
     let bytes = entry.as_bytes();
     let start = (req.offset as usize).min(bytes.len());
@@ -242,18 +240,28 @@ pub fn release_source(req: ReleaseSourceRequest, state: State<Arc<AppState>>) ->
 }
 
 fn parse_handle(raw: &str) -> HexForgeResult<Uuid> {
-    Uuid::parse_str(raw).map_err(|_| HexForgeError::invalid_input(format!("'{raw}' is not a valid source handle")))
+    Uuid::parse_str(raw)
+        .map_err(|_| HexForgeError::invalid_input(format!("'{raw}' is not a valid source handle")))
 }
 
 fn validate_fs_path(path: &str, field: &str) -> HexForgeResult<()> {
     if path.is_empty() {
-        return Err(HexForgeError::invalid_parameter(field, "path must not be empty"));
+        return Err(HexForgeError::invalid_parameter(
+            field,
+            "path must not be empty",
+        ));
     }
     if path.len() > 4096 {
-        return Err(HexForgeError::invalid_parameter(field, "path exceeds maximum length (4096)"));
+        return Err(HexForgeError::invalid_parameter(
+            field,
+            "path exceeds maximum length (4096)",
+        ));
     }
     if path.contains('\0') {
-        return Err(HexForgeError::invalid_parameter(field, "path contains null byte"));
+        return Err(HexForgeError::invalid_parameter(
+            field,
+            "path contains null byte",
+        ));
     }
     Ok(())
 }
@@ -315,13 +323,17 @@ pub async fn patch_source(
     state.cache.lock().clear();
 
     // FR-1.6: потребители патчнутого источника устарели — уведомляем UI.
-    let stale =
-        hexforge_engine::scheduler::compute_invalidated_for_source(&state.graph.read(), &req.handle);
+    let stale = hexforge_engine::scheduler::compute_invalidated_for_source(
+        &state.graph.read(),
+        &req.handle,
+    );
     if !stale.is_empty() {
         use tauri::Emitter;
         let _ = app.emit(
             "graph://invalidated",
-            hexforge_engine::scheduler::GraphInvalidatedEvent { stale_node_ids: stale },
+            hexforge_engine::scheduler::GraphInvalidatedEvent {
+                stale_node_ids: stale,
+            },
         );
     }
 
@@ -329,8 +341,6 @@ pub async fn patch_source(
         new_size_bytes: new_size as u64,
     })
 }
-
-
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,7 +371,9 @@ pub async fn set_graph(
         // Ошибка доставки сознательно игнорируется: нет слушателя — не беда.
         let _ = app.emit(
             "graph://invalidated",
-            hexforge_engine::scheduler::GraphInvalidatedEvent { stale_node_ids: stale },
+            hexforge_engine::scheduler::GraphInvalidatedEvent {
+                stale_node_ids: stale,
+            },
         );
     }
     Ok(())
@@ -637,7 +649,10 @@ pub fn import_recipe(
     import_recipe_inner(state.inner(), req)
 }
 
-fn import_recipe_inner(state: &AppState, req: ImportRecipeRequest) -> HexForgeResult<ImportRecipeResponse> {
+fn import_recipe_inner(
+    state: &AppState,
+    req: ImportRecipeRequest,
+) -> HexForgeResult<ImportRecipeResponse> {
     validate_fs_path(&req.source_path, "sourcePath")?;
     let text = std::fs::read_to_string(&req.source_path).map_err(|e| {
         HexForgeError::invalid_input(format!("cannot read '{}': {e}", req.source_path))
@@ -749,28 +764,56 @@ fn map_cyberchef_op(op: &str, _args: &[serde_json::Value]) -> Option<(String, se
 }
 
 #[tauri::command]
-pub fn import_cyberchef_recipe(req: ImportCyberChefRecipeRequest, _state: State<Arc<AppState>>) -> HexForgeResult<ImportCyberChefRecipeResponse> {
+pub fn import_cyberchef_recipe(
+    req: ImportCyberChefRecipeRequest,
+    _state: State<Arc<AppState>>,
+) -> HexForgeResult<ImportCyberChefRecipeResponse> {
     validate_fs_path(&req.source_path, "sourcePath")?;
-    let text = std::fs::read_to_string(&req.source_path).map_err(|e| HexForgeError::invalid_input(format!("cannot read '{}': {e}", req.source_path)))?;
-    let ops: Vec<CyberChefOp> = serde_json::from_str(&text).map_err(|e| HexForgeError::invalid_input(format!("'{}' is not a valid CyberChef recipe: {e}", req.source_path)))?;
-    let mut nodes: std::collections::HashMap<String, hexforge_engine::graph_dto::OperationNodeDto> = std::collections::HashMap::new();
+    let text = std::fs::read_to_string(&req.source_path).map_err(|e| {
+        HexForgeError::invalid_input(format!("cannot read '{}': {e}", req.source_path))
+    })?;
+    let ops: Vec<CyberChefOp> = serde_json::from_str(&text).map_err(|e| {
+        HexForgeError::invalid_input(format!(
+            "'{}' is not a valid CyberChef recipe: {e}",
+            req.source_path
+        ))
+    })?;
+    let mut nodes: std::collections::HashMap<String, hexforge_engine::graph_dto::OperationNodeDto> =
+        std::collections::HashMap::new();
     let mut unmapped = Vec::new();
     let mut prev_id: Option<String> = None;
     for op in ops {
         if let Some((hex_id, params)) = map_cyberchef_op(&op.op, &op.args) {
             let id = Uuid::new_v4().to_string();
             let inputs = prev_id.clone().into_iter().collect();
-            nodes.insert(id.clone(), hexforge_engine::graph_dto::OperationNodeDto { id: id.clone(), operation_id: hex_id, operation_version: "1.0.0".into(), params, inputs });
+            nodes.insert(
+                id.clone(),
+                hexforge_engine::graph_dto::OperationNodeDto {
+                    id: id.clone(),
+                    operation_id: hex_id,
+                    operation_version: "1.0.0".into(),
+                    params,
+                    inputs,
+                },
+            );
             prev_id = Some(id);
         } else {
-            unmapped.push(UnmappedOp { cyber_chef_id: op.op.clone(), reason: "no HexForge equivalent".into() });
+            unmapped.push(UnmappedOp {
+                cyber_chef_id: op.op.clone(),
+                reason: "no HexForge equivalent".into(),
+            });
         }
     }
     // Validate resulting graph is DAG (linear chain always is, but check)
-    let graph = GraphDto { nodes: nodes.clone() };
+    let graph = GraphDto {
+        nodes: nodes.clone(),
+    };
     let g: Graph = graph.clone().try_into()?;
     g.topo_order().map_err(HexForgeError::from)?;
-    Ok(ImportCyberChefRecipeResponse { graph, unmapped_operations: unmapped })
+    Ok(ImportCyberChefRecipeResponse {
+        graph,
+        unmapped_operations: unmapped,
+    })
 }
 
 // ---------- History ----------
@@ -810,9 +853,7 @@ fn list_snapshots_inner(state: &AppState) -> Vec<SnapshotDto> {
             operation_version: s.operation_version.clone(),
             params: s.params.clone(),
             input_content_hash: s.input_content_hash.to_hex().to_string(),
-            output_content_hash: s
-                .output_content_hash
-                .map(|h| h.to_hex().to_string()),
+            output_content_hash: s.output_content_hash.map(|h| h.to_hex().to_string()),
         })
         .collect()
 }
@@ -838,9 +879,10 @@ pub async fn diff_snapshots(
     let a = parse_handle(&req.a_snapshot_id)?;
     let b = parse_handle(&req.b_snapshot_id)?;
     let exec_state = Arc::clone(state.inner());
-    let diff = tauri::async_runtime::spawn_blocking(move || scheduler::diff_snapshots(&exec_state, a, b))
-        .await
-        .map_err(|e| HexForgeError::internal(format!("diff worker failed: {e}")))??;
+    let diff =
+        tauri::async_runtime::spawn_blocking(move || scheduler::diff_snapshots(&exec_state, a, b))
+            .await
+            .map_err(|e| HexForgeError::internal(format!("diff worker failed: {e}")))??;
     Ok(DiffSnapshotsResponse { diff_text: diff })
 }
 
@@ -871,8 +913,8 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
 mod tests {
     use super::*;
     use hexforge_core::graph::{NodeId, OperationNode};
-    use hexforge_engine::graph_dto::OperationNodeDto;
     use hexforge_engine::error::HexForgeErrorKind;
+    use hexforge_engine::graph_dto::OperationNodeDto;
 
     #[test]
     fn detect_mime_known_magic_bytes() {
@@ -880,9 +922,18 @@ mod tests {
             detect_mime(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]).as_deref(),
             Some("image/png")
         );
-        assert_eq!(detect_mime(&[0xFF, 0xD8, 0xFF, 0xE0]).as_deref(), Some("image/jpeg"));
-        assert_eq!(detect_mime(b"PK\x03\x04rest").as_deref(), Some("application/zip"));
-        assert_eq!(detect_mime(&[0x1F, 0x8B, 0x08, 0x00]).as_deref(), Some("application/gzip"));
+        assert_eq!(
+            detect_mime(&[0xFF, 0xD8, 0xFF, 0xE0]).as_deref(),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            detect_mime(b"PK\x03\x04rest").as_deref(),
+            Some("application/zip")
+        );
+        assert_eq!(
+            detect_mime(&[0x1F, 0x8B, 0x08, 0x00]).as_deref(),
+            Some("application/gzip")
+        );
         assert_eq!(
             detect_mime(b"MZ\x90\x00\x03").as_deref(),
             Some("application/x-msdownload")
@@ -911,7 +962,10 @@ mod tests {
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
         assert!(err.message.contains("not a valid source handle"));
 
-        assert_eq!(parse_handle("").unwrap_err().kind, HexForgeErrorKind::InvalidInput);
+        assert_eq!(
+            parse_handle("").unwrap_err().kind,
+            HexForgeErrorKind::InvalidInput
+        );
     }
 
     #[test]
@@ -925,8 +979,10 @@ mod tests {
     /// Собирает граф root(sourceHandle) → base64-encode поверх реального
     /// реестра операций — без Tauri State, через чистый AppState.
     fn setup_chain(state: &AppState, literal: &[u8]) -> (NodeId, NodeId) {
-        let source_handle =
-            state.sources.write().insert(SourceEntry::InMemory(literal.to_vec()));
+        let source_handle = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(literal.to_vec()));
 
         let root_id = NodeId::new_v4();
         let encode_id = NodeId::new_v4();
@@ -964,9 +1020,8 @@ mod tests {
         let rot13_hello = rot13(b"Hello");
         let expected_b64 = general_purpose::STANDARD.encode(&rot13_hello);
 
-        let output =
-            scheduler::execute_chain(&state, &encode_id, &fresh_token(), &no_progress)
-                .expect("chain must execute");
+        let output = scheduler::execute_chain(&state, &encode_id, &fresh_token(), &no_progress)
+            .expect("chain must execute");
         assert_eq!(output.as_slice(), expected_b64.into_bytes().as_slice());
 
         {
@@ -980,7 +1035,10 @@ mod tests {
             assert_eq!(snaps[1].parent, Some(snaps[0].id));
             // Content-hash'и фиксируют фактические байты входа/выхода узла.
             assert_eq!(snaps[0].input_content_hash, blake3::hash(b"Hello"));
-            assert_eq!(snaps[0].output_content_hash, Some(blake3::hash(&rot13_hello)));
+            assert_eq!(
+                snaps[0].output_content_hash,
+                Some(blake3::hash(&rot13_hello))
+            );
             // Вход следующего узла — выход предыдущего (воспроизводимость FR-4.2).
             assert_eq!(snaps[1].input_content_hash, blake3::hash(&rot13_hello));
             assert_eq!(history.current, Some(snaps[1].id));
@@ -1014,7 +1072,10 @@ mod tests {
     fn run_node_rejects_version_mismatch() {
         let state = AppState::new(hexforge_ops::build_registry());
         let node_id = NodeId::new_v4();
-        let source_handle = state.sources.write().insert(SourceEntry::InMemory(b"x".to_vec()));
+        let source_handle = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"x".to_vec()));
         state.graph.write().insert_node(OperationNode {
             id: node_id,
             operation_id: "text.rot13".into(),
@@ -1023,7 +1084,8 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
+        let err =
+            scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("version mismatch"));
         assert_eq!(err.node_id.as_deref(), Some(node_id.to_string().as_str()));
@@ -1035,7 +1097,10 @@ mod tests {
     fn run_node_rejects_unknown_operation() {
         let state = AppState::new(hexforge_ops::build_registry());
         let node_id = NodeId::new_v4();
-        let source_handle = state.sources.write().insert(SourceEntry::InMemory(b"x".to_vec()));
+        let source_handle = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"x".to_vec()));
         state.graph.write().insert_node(OperationNode {
             id: node_id,
             operation_id: "encoding.nonexistent".into(),
@@ -1044,7 +1109,8 @@ mod tests {
             inputs: vec![],
         });
 
-        let err = scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
+        let err =
+            scheduler::execute_chain(&state, &node_id, &fresh_token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::Internal);
         assert!(err.message.contains("unknown operation"));
     }
@@ -1308,7 +1374,9 @@ mod tests {
             })
         );
 
-        let resp = PatchSourceResponse { new_size_bytes: 8192 };
+        let resp = PatchSourceResponse {
+            new_size_bytes: 8192,
+        };
         assert_eq!(
             serde_json::to_value(&resp).unwrap(),
             serde_json::json!({ "newSizeBytes": 8192 })
@@ -1419,10 +1487,13 @@ mod tests {
         let path = std::env::temp_dir().join(format!("hexforge-recipe-{}.json", Uuid::new_v4()));
         let _guard = DropGuard(path.clone());
 
-        export_recipe_inner(&state, ExportRecipeRequest {
-            graph: dto.clone(),
-            target_path: path.to_string_lossy().into_owned(),
-        })
+        export_recipe_inner(
+            &state,
+            ExportRecipeRequest {
+                graph: dto.clone(),
+                target_path: path.to_string_lossy().into_owned(),
+            },
+        )
         .expect("reproducible recipe must export");
 
         // Файл — валидный JSON структуры GraphDto (camelCase).
@@ -1463,7 +1534,8 @@ mod tests {
             },
         );
 
-        let path = std::env::temp_dir().join(format!("hexforge-recipe-miss-{}.json", Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("hexforge-recipe-miss-{}.json", Uuid::new_v4()));
         std::fs::write(
             &path,
             serde_json::to_string_pretty(&GraphDto { nodes }).unwrap(),
@@ -1517,8 +1589,7 @@ mod tests {
     fn import_rejects_invalid_json_and_cycles() {
         let state = AppState::new(hexforge_ops::build_registry());
 
-        let bad_json =
-            std::env::temp_dir().join(format!("hexforge-bad-{}.json", Uuid::new_v4()));
+        let bad_json = std::env::temp_dir().join(format!("hexforge-bad-{}.json", Uuid::new_v4()));
         std::fs::write(&bad_json, "{ not json").unwrap();
         let err = import_recipe_inner(
             &state,

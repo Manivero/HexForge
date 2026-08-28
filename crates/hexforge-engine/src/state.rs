@@ -68,9 +68,12 @@ impl SourceStore {
             .ok_or(WriteRegionError::UnknownHandle)?;
         match entry {
             SourceEntry::InMemory(buf) => {
-                let end = offset.checked_add(data.len()).ok_or(
-                    WriteRegionError::OutOfBounds { size: buf.len(), required_end: usize::MAX },
-                )?;
+                let end = offset
+                    .checked_add(data.len())
+                    .ok_or(WriteRegionError::OutOfBounds {
+                        size: buf.len(),
+                        required_end: usize::MAX,
+                    })?;
                 if end > buf.len() {
                     return Err(WriteRegionError::OutOfBounds {
                         size: buf.len(),
@@ -83,9 +86,12 @@ impl SourceStore {
             SourceEntry::Mapped(mmap) => {
                 // Copy-on-write: materialize file bytes into InMemory
                 let mut buf = mmap[..].to_vec();
-                let end = offset.checked_add(data.len()).ok_or(
-                    WriteRegionError::OutOfBounds { size: buf.len(), required_end: usize::MAX },
-                )?;
+                let end = offset
+                    .checked_add(data.len())
+                    .ok_or(WriteRegionError::OutOfBounds {
+                        size: buf.len(),
+                        required_end: usize::MAX,
+                    })?;
                 if end > buf.len() {
                     return Err(WriteRegionError::OutOfBounds {
                         size: buf.len(),
@@ -201,7 +207,9 @@ impl OutputCache {
             let old_size = existing.output.len();
             // Освобождаем место с учётом перезаписи (не вытесняем сам обновляемый ключ)
             while self.used_bytes - old_size + size > self.max_bytes {
-                let Some(oldest) = self.order.front().cloned() else { break; };
+                let Some(oldest) = self.order.front().cloned() else {
+                    break;
+                };
                 if oldest == key {
                     break;
                 }
@@ -344,7 +352,10 @@ mod tests {
             cache.get("k2").is_none(),
             "LRU: давно неиспользуемый k2 должен быть вытеснен первым"
         );
-        assert!(cache.get("k1").is_some(), "недавно использованный k1 должен остаться");
+        assert!(
+            cache.get("k1").is_some(),
+            "недавно использованный k1 должен остаться"
+        );
         assert!(cache.get("k3").is_some());
 
         // Результат больше бюджета не кэшируется вовсе.
@@ -364,7 +375,10 @@ mod tests {
         // order теперь [k2,k3,k1]
         cache.put("k4".into(), Arc::new(vec![0; 30]));
         // нужно вытеснить 30 байт → evict k2
-        assert!(cache.get("k2").is_none(), "k2 — давно неиспользуемый, должен вытесниться");
+        assert!(
+            cache.get("k2").is_none(),
+            "k2 — давно неиспользуемый, должен вытесниться"
+        );
         assert!(cache.get("k1").is_some());
         assert!(cache.get("k3").is_some());
         assert!(cache.get("k4").is_some());
@@ -400,7 +414,10 @@ mod tests {
         let err = store.write_region(&h, 3, b"TOOLONG").unwrap_err();
         assert_eq!(
             err,
-            WriteRegionError::OutOfBounds { size: 5, required_end: 10 }
+            WriteRegionError::OutOfBounds {
+                size: 5,
+                required_end: 10
+            }
         );
         assert_eq!(store.get(&h).unwrap().as_bytes(), b"HEY!O");
 
@@ -419,12 +436,21 @@ mod tests {
     fn write_region_error_variants_are_distinguishable() {
         use super::WriteRegionError;
         assert_ne!(
-            WriteRegionError::OutOfBounds { size: 1, required_end: 2 },
+            WriteRegionError::OutOfBounds {
+                size: 1,
+                required_end: 2
+            },
             WriteRegionError::UnknownHandle
         );
         assert_ne!(
-            WriteRegionError::OutOfBounds { size: 1, required_end: 2 },
-            WriteRegionError::OutOfBounds { size: 2, required_end: 3 }
+            WriteRegionError::OutOfBounds {
+                size: 1,
+                required_end: 2
+            },
+            WriteRegionError::OutOfBounds {
+                size: 2,
+                required_end: 3
+            }
         );
     }
 

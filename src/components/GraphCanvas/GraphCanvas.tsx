@@ -20,19 +20,13 @@ export function GraphCanvas() {
   const staleNodeIds = useAppStore((s) => s.staleNodeIds);
 
   const order = React.useMemo(() => layoutOrder(nodes), [nodes]);
-  const staleSet = React.useMemo(
-    () => new Set(staleNodeIds),
-    [staleNodeIds],
-  );
+  const staleSet = React.useMemo(() => new Set(staleNodeIds), [staleNodeIds]);
 
   return (
     // Рельс слева: непрерывная вертикальная линия через все узлы цепочки.
     <div className="relative pl-6">
       {order.length > 0 && (
-        <span
-          aria-hidden
-          className="absolute bottom-3 left-3 top-3 w-px bg-border-default"
-        />
+        <span aria-hidden className="absolute bottom-3 left-3 top-3 w-px bg-border-default" />
       )}
       <ol className="flex flex-col gap-1.5">
         {order.map(({ id }) => {
@@ -66,50 +60,46 @@ export function GraphCanvas() {
               />
               <div className="relative flex-1">
                 <button
-                onClick={() => selectNode(id)}
-                data-node-id={id}
-                className={[
-                  "w-full rounded-md border px-3 py-2 text-left transition-colors duration-fast ease-out-expo",
-                  isSelected
-                    ? "border-border-focus bg-surface-2"
-                    : "border-border-subtle bg-surface-2 hover:border-border-default",
-                ].join(" ")}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs text-text-primary">
-                    {node.operationId}
-                    {isRunning && (
-                      <span className="ml-2 text-status-running">running…</span>
-                    )}
-                    {isStale && !isRunning && (
-                      <span className="ml-2 text-status-stale">stale</span>
-                    )}
-                  </span>
-                  <span className="text-2xs text-text-muted">
-                    v{node.operationVersion}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex items-center justify-between gap-2 font-mono text-2xs text-text-muted">
-                  <span>{id.slice(0, ID_SLICE)}</span>
-                  {sourceHandle && (
-                    <span className="text-status-stale">
-                      src {sourceHandle.slice(0, ID_SLICE)}
+                  onClick={() => selectNode(id)}
+                  data-node-id={id}
+                  className={[
+                    "w-full rounded-md border px-3 py-2 text-left transition-colors duration-fast ease-out-expo",
+                    isSelected
+                      ? "border-border-focus bg-surface-2"
+                      : "border-border-subtle bg-surface-2 hover:border-border-default",
+                  ].join(" ")}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs text-text-primary">
+                      {node.operationId}
+                      {isRunning && <span className="ml-2 text-status-running">running…</span>}
+                      {isStale && !isRunning && (
+                        <span className="ml-2 text-status-stale">stale</span>
+                      )}
                     </span>
-                  )}
-                </div>
-              </button>
-              <button
-                aria-label="Delete node"
-                title="Удалить узел (дети мостятся к родителю)"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deleteNode(id);
-                }}
-                className="absolute right-1 top-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-2xs leading-none text-text-muted opacity-0 transition-opacity duration-fast hover:text-status-error focus:opacity-100 [li:hover_&]:opacity-100"
-              >
-                ✕
-              </button>
-            </div>
+                    <span className="text-2xs text-text-muted">v{node.operationVersion}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center justify-between gap-2 font-mono text-2xs text-text-muted">
+                    <span>{id.slice(0, ID_SLICE)}</span>
+                    {sourceHandle && (
+                      <span className="text-status-stale">
+                        src {sourceHandle.slice(0, ID_SLICE)}
+                      </span>
+                    )}
+                  </div>
+                </button>
+                <button
+                  aria-label="Delete node"
+                  title="Удалить узел (дети мостятся к родителю)"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteNode(id);
+                  }}
+                  className="absolute right-1 top-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-2xs leading-none text-text-muted opacity-0 transition-opacity duration-fast hover:text-status-error focus:opacity-100 [li:hover_&]:opacity-100"
+                >
+                  ✕
+                </button>
+              </div>
             </li>
           );
         })}

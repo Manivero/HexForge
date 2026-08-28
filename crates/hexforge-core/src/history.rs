@@ -143,19 +143,14 @@ mod hash_hex {
 mod option_hash_hex {
     use serde::{Deserialize, Deserializer, Serializer};
 
-    pub fn serialize<S: Serializer>(
-        hash: &Option<blake3::Hash>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
+    pub fn serialize<S: Serializer>(hash: &Option<blake3::Hash>, s: S) -> Result<S::Ok, S::Error> {
         match hash {
             Some(h) => s.serialize_str(&h.to_hex()),
             None => s.serialize_none(),
         }
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        d: D,
-    ) -> Result<Option<blake3::Hash>, D::Error> {
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<blake3::Hash>, D::Error> {
         let opt = Option::<String>::deserialize(d)?;
         opt.map(|hex| hex.parse().map_err(serde::de::Error::custom))
             .transpose()
@@ -238,8 +233,7 @@ mod tests {
         history.record(snapshot_for_test(second, Some(first)));
 
         assert_eq!(history.order, vec![first, second]);
-        let ordered: Vec<SnapshotId> =
-            history.ordered_snapshots().iter().map(|s| s.id).collect();
+        let ordered: Vec<SnapshotId> = history.ordered_snapshots().iter().map(|s| s.id).collect();
         assert_eq!(ordered, vec![first, second]);
 
         // Перезапись существующего id не должна дублировать запись в order.

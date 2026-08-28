@@ -92,7 +92,9 @@ impl Transform for Crc32Hash {
         if state.downcast_ref::<Crc32State>().is_none() {
             *state = Box::new(Crc32State::default());
         }
-        let st = state.downcast_mut::<Crc32State>().expect("Crc32State seeded");
+        let st = state
+            .downcast_mut::<Crc32State>()
+            .expect("Crc32State seeded");
         let t = table();
         for &b in chunk {
             st.crc = t[((st.crc ^ b as u32) & 0xff) as usize] ^ (st.crc >> 8);
@@ -110,13 +112,15 @@ inventory::submit! { crate::TransformEntry(&Crc32Hash) }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use hexforge_core::transform::NullExecutionContext;
+    use serde_json::json;
 
     #[test]
     fn empty_input_zero() {
         let ctx = NullExecutionContext;
-        let out = Crc32Hash.apply(Cow::Borrowed(b""), &json!({}), &ctx).unwrap();
+        let out = Crc32Hash
+            .apply(Cow::Borrowed(b""), &json!({}), &ctx)
+            .unwrap();
         assert_eq!(out.as_ref(), b"00000000");
     }
 
@@ -142,8 +146,12 @@ mod tests {
     #[test]
     fn different_inputs_different_hashes() {
         let ctx = NullExecutionContext;
-        let a = Crc32Hash.apply(Cow::Borrowed(b"a"), &json!({}), &ctx).unwrap();
-        let b = Crc32Hash.apply(Cow::Borrowed(b"b"), &json!({}), &ctx).unwrap();
+        let a = Crc32Hash
+            .apply(Cow::Borrowed(b"a"), &json!({}), &ctx)
+            .unwrap();
+        let b = Crc32Hash
+            .apply(Cow::Borrowed(b"b"), &json!({}), &ctx)
+            .unwrap();
         assert_ne!(a, b);
     }
 
@@ -151,12 +159,26 @@ mod tests {
     fn chunked_matches_whole() {
         let ctx = NullExecutionContext;
         let data = b"hello world crc32 chunked test";
-        let whole = Crc32Hash.apply(Cow::Borrowed(data), &json!({}), &ctx).unwrap();
+        let whole = Crc32Hash
+            .apply(Cow::Borrowed(data), &json!({}), &ctx)
+            .unwrap();
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut out = Vec::new();
-        out.extend_from_slice(&Crc32Hash.apply_chunk(b"hello ", false, &mut state, &json!({}), &ctx).unwrap());
-        out.extend_from_slice(&Crc32Hash.apply_chunk(b"world ", false, &mut state, &json!({}), &ctx).unwrap());
-        out.extend_from_slice(&Crc32Hash.apply_chunk(b"crc32 chunked test", true, &mut state, &json!({}), &ctx).unwrap());
+        out.extend_from_slice(
+            &Crc32Hash
+                .apply_chunk(b"hello ", false, &mut state, &json!({}), &ctx)
+                .unwrap(),
+        );
+        out.extend_from_slice(
+            &Crc32Hash
+                .apply_chunk(b"world ", false, &mut state, &json!({}), &ctx)
+                .unwrap(),
+        );
+        out.extend_from_slice(
+            &Crc32Hash
+                .apply_chunk(b"crc32 chunked test", true, &mut state, &json!({}), &ctx)
+                .unwrap(),
+        );
         assert_eq!(out, whole.as_ref());
     }
 }

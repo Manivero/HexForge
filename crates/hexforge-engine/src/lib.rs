@@ -16,6 +16,4 @@ pub mod scheduler;
 pub mod state;
 
 pub use error::{HexForgeError, HexForgeErrorKind, HexForgeResult};
-pub use state::{
-    AppState, CancellationToken, SourceEntry, SourceStore, WriteRegionError,
-};
+pub use state::{AppState, CancellationToken, SourceEntry, SourceStore, WriteRegionError};

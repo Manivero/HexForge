@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 fn rot13_byte(b: u8) -> u8 {
@@ -84,9 +86,14 @@ mod tests {
 
         let mut state: Box<dyn std::any::Any + Send> = Box::new(());
         let mut chunked = Vec::new();
-        for (i, part) in [b"Spl".as_slice(), b"it ", b"Me", b" 123"].iter().enumerate() {
+        for (i, part) in [b"Spl".as_slice(), b"it ", b"Me", b" 123"]
+            .iter()
+            .enumerate()
+        {
             chunked.extend_from_slice(
-                &Rot13.apply_chunk(part, i == 3, &mut state, &params, &ctx).unwrap(),
+                &Rot13
+                    .apply_chunk(part, i == 3, &mut state, &params, &ctx)
+                    .unwrap(),
             );
         }
         assert_eq!(whole.as_ref(), chunked.as_slice());

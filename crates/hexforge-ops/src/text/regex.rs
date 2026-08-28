@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use regex::Regex;
 use std::borrow::Cow;
 
@@ -39,10 +41,13 @@ impl Transform for RegexExtract {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let pattern = params.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "pattern".into(),
-            reason: "string parameter 'pattern' is required".into(),
-        })?;
+        let pattern = params
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TransformError::InvalidParameter {
+                field: "pattern".into(),
+                reason: "string parameter 'pattern' is required".into(),
+            })?;
         let re = Regex::new(pattern).map_err(|e| TransformError::InvalidParameter {
             field: "pattern".into(),
             reason: format!("invalid regex: {e}"),
@@ -95,14 +100,20 @@ impl Transform for RegexReplace {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let pattern = params.get("pattern").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "pattern".into(),
-            reason: "string parameter 'pattern' is required".into(),
-        })?;
-        let replacement = params.get("replacement").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "replacement".into(),
-            reason: "string parameter 'replacement' is required".into(),
-        })?;
+        let pattern = params
+            .get("pattern")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TransformError::InvalidParameter {
+                field: "pattern".into(),
+                reason: "string parameter 'pattern' is required".into(),
+            })?;
+        let replacement = params
+            .get("replacement")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TransformError::InvalidParameter {
+                field: "replacement".into(),
+                reason: "string parameter 'replacement' is required".into(),
+            })?;
         let re = Regex::new(pattern).map_err(|e| TransformError::InvalidParameter {
             field: "pattern".into(),
             reason: format!("invalid regex: {e}"),
@@ -164,7 +175,11 @@ mod tests {
     fn invalid_pattern_rejected() {
         let ctx = NullExecutionContext;
         let err = RegexExtract
-            .apply(Cow::Borrowed(b"x"), &serde_json::json!({"pattern": "["}), &ctx)
+            .apply(
+                Cow::Borrowed(b"x"),
+                &serde_json::json!({"pattern": "["}),
+                &ctx,
+            )
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }
@@ -172,7 +187,9 @@ mod tests {
     #[test]
     fn missing_params_rejected() {
         let ctx = NullExecutionContext;
-        let err = RegexExtract.apply(Cow::Borrowed(b"x"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err = RegexExtract
+            .apply(Cow::Borrowed(b"x"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }
 }

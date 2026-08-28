@@ -12,9 +12,7 @@ import { useAppStore } from "@/store/useAppStore";
  */
 
 export function InspectorPanel() {
-  const node = useAppStore((s) =>
-    s.selectedNodeId ? s.nodes[s.selectedNodeId] : undefined,
-  );
+  const node = useAppStore((s) => (s.selectedNodeId ? s.nodes[s.selectedNodeId] : undefined));
   const operation = useAppStore((s) =>
     node ? s.operations.find((o) => o.id === node.operationId) : undefined,
   );
@@ -55,8 +53,7 @@ export function InspectorPanel() {
     );
 
     if (field.enumValues.length > 0) {
-      const current =
-        typeof effective === "string" ? effective : field.enumValues[0] ?? "";
+      const current = typeof effective === "string" ? effective : (field.enumValues[0] ?? "");
       return (
         <div key={field.name} className="flex flex-col gap-1">
           {label}
@@ -64,9 +61,7 @@ export function InspectorPanel() {
             id={`param-${field.name}`}
             data-selectable
             value={current}
-            onChange={(e) =>
-              updateNodeParams(node.id, { [field.name]: e.target.value })
-            }
+            onChange={(e) => updateNodeParams(node.id, { [field.name]: e.target.value })}
             className={[
               "rounded-md border border-border-default bg-surface-2 px-2 py-1.5",
               "text-xs text-text-primary outline-none focus:border-border-focus",
@@ -90,9 +85,7 @@ export function InspectorPanel() {
             id={`param-${field.name}`}
             type="checkbox"
             checked={checked}
-            onChange={(e) =>
-              updateNodeParams(node.id, { [field.name]: e.target.checked })
-            }
+            onChange={(e) => updateNodeParams(node.id, { [field.name]: e.target.checked })}
             className="h-3.5 w-3.5 accent-[var(--accent-9)]"
           />
           {label}
@@ -137,9 +130,7 @@ export function InspectorPanel() {
           data-selectable
           type="text"
           value={text}
-          onChange={(e) =>
-            updateNodeParams(node.id, { [field.name]: e.target.value })
-          }
+          onChange={(e) => updateNodeParams(node.id, { [field.name]: e.target.value })}
           className={[
             "rounded-md border border-border-default bg-surface-2 px-2 py-1.5",
             "font-mono text-xs text-text-primary outline-none focus:border-border-focus",
@@ -158,9 +149,7 @@ export function InspectorPanel() {
         </span>
       </header>
       {fields.length === 0 ? (
-        <p className="text-xs text-text-muted">
-          У операции нет параметров.
-        </p>
+        <p className="text-xs text-text-muted">У операции нет параметров.</p>
       ) : (
         <div className="flex flex-col gap-3">{fields.map(renderField)}</div>
       )}

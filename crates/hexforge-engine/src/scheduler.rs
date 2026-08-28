@@ -21,9 +21,9 @@ use crate::state::{AppState, CancellationToken};
 use hexforge_core::graph::{NodeId, OperationNode};
 use hexforge_core::transform::{ExecutionContext, NullExecutionContext};
 use hexforge_stream::{chunk_ranges, DEFAULT_CHUNK_SIZE_BYTES};
+use parking_lot::Mutex as StageMutex;
 use serde::Serialize;
 use std::borrow::Cow;
-use parking_lot::Mutex as StageMutex;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -100,7 +100,10 @@ fn resolve_node(
     let node = {
         let graph = state.graph.read();
         graph.nodes.get(node_id).cloned().ok_or_else(|| {
-            HexForgeError::internal_for_node(node_id, format!("node {node_id} not found in current graph"))
+            HexForgeError::internal_for_node(
+                node_id,
+                format!("node {node_id} not found in current graph"),
+            )
         })?
     };
 
@@ -182,10 +185,14 @@ fn resolve_source_input(
         .get("sourceHandle")
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            HexForgeError::invalid_parameter("sourceHandle", "root node requires params.sourceHandle")
+            HexForgeError::invalid_parameter(
+                "sourceHandle",
+                "root node requires params.sourceHandle",
+            )
         })?;
-    let handle =
-        Uuid::parse_str(handle_str).map_err(|_| HexForgeError::invalid_input(format!("'{handle_str}' is not a valid source handle")))?;
+    let handle = Uuid::parse_str(handle_str).map_err(|_| {
+        HexForgeError::invalid_input(format!("'{handle_str}' is not a valid source handle"))
+    })?;
     let sources = state.sources.read();
     let entry = sources.get(&handle).ok_or_else(|| {
         HexForgeError::internal_for_node(node_id, format!("unknown source handle: {handle_str}"))
@@ -197,15 +204,12 @@ fn lookup_transform(
     node: &OperationNode,
     state: &AppState,
 ) -> HexForgeResult<&'static dyn hexforge_core::Transform> {
-    let transform = state
-        .registry
-        .get(&node.operation_id)
-        .ok_or_else(|| {
-            HexForgeError::internal_for_node(
-                node.id,
-                format!("unknown operation: {}", node.operation_id),
-            )
-        })?;
+    let transform = state.registry.get(&node.operation_id).ok_or_else(|| {
+        HexForgeError::internal_for_node(
+            node.id,
+            format!("unknown operation: {}", node.operation_id),
+        )
+    })?;
     if transform.version() != node.operation_version {
         return Err(HexForgeError::internal_for_node(
             node.id,
@@ -281,14 +285,17 @@ fn execute_merge_node(
     token: &CancellationToken,
     inputs: Vec<Arc<Vec<u8>>>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
-    let merge = state.registry.get_merge(&node.operation_id).ok_or_else(|| {
-        HexForgeError::invalid_input(format!(
-            "operation '{}' does not support {} inputs: node requires a merge operation \
+    let merge = state
+        .registry
+        .get_merge(&node.operation_id)
+        .ok_or_else(|| {
+            HexForgeError::invalid_input(format!(
+                "operation '{}' does not support {} inputs: node requires a merge operation \
              (PRD FR-1.4), but no MergeTransform is registered",
-            node.operation_id,
-            node.inputs.len()
-        ))
-    })?;
+                node.operation_id,
+                node.inputs.len()
+            ))
+        })?;
     // Версию проверяем по базовой Transform-регистрации (merge-трейт её
     // наследует; обе карты заполняются одной операцией).
     lookup_transform(node, state)?;
@@ -329,13 +336,14 @@ fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult
         return Ok(None);
     }
 
-    let mut stages: Vec<Arc<StageMutex<FusionStage>>> = vec![Arc::new(StageMutex::new(FusionStage {
-        node: node.clone(),
-        transform: top,
-        input_hasher: blake3::Hasher::new(),
-        output_hasher: blake3::Hasher::new(),
-        state: Box::new(()),
-    }))];
+    let mut stages: Vec<Arc<StageMutex<FusionStage>>> =
+        vec![Arc::new(StageMutex::new(FusionStage {
+            node: node.clone(),
+            transform: top,
+            input_hasher: blake3::Hasher::new(),
+            output_hasher: blake3::Hasher::new(),
+            state: Box::new(()),
+        }))];
 
     let mut cursor = node.clone();
     let base_parent: Option<NodeId> = loop {
@@ -366,7 +374,10 @@ fn build_stream_fusion(state: &AppState, node: &OperationNode) -> HexForgeResult
     };
 
     stages.reverse(); // снизу-вверх: первая стадия потребляет базовый буфер
-    Ok(Some(FusedRun { stages, base_parent }))
+    Ok(Some(FusedRun {
+        stages,
+        base_parent,
+    }))
 }
 
 struct FusedRun {
@@ -420,7 +431,6 @@ fn execute_fused_sequential(
     token: &CancellationToken,
     on_progress: ProgressSink<'_>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
-
     let ranges = chunk_ranges(base_input.len(), hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES);
     let effective_ranges: &[(usize, usize)] = if ranges.is_empty() {
         &[(0, 0)]
@@ -499,7 +509,7 @@ fn finalize_fused(
 /// Параллельный конвейер: каждая стадия — отдельный поток, чанки идут через
 /// bounded `sync_channel(cap)` → память ограничена stages × cap × chunk_size,
 /// pull потребителя даёт backpressure. Ошибки операций и отмена передаются
- /// Err-сообщением вниз по цепочке; выход воркера роняет его sender и каскадно
+/// Err-сообщением вниз по цепочке; выход воркера роняет его sender и каскадно
 /// закрывает апстрим.
 fn execute_fused_parallel(
     state: &AppState,
@@ -513,10 +523,8 @@ fn execute_fused_parallel(
     type ChunkMsg = Result<(Vec<u8>, bool), HexForgeError>;
 
     let stages_len = run.stages.len();
-    let mut txs: Vec<Option<mpsc::SyncSender<ChunkMsg>>> =
-        Vec::with_capacity(stages_len + 1);
-    let mut rxs: Vec<Option<mpsc::Receiver<ChunkMsg>>> =
-        Vec::with_capacity(stages_len + 1);
+    let mut txs: Vec<Option<mpsc::SyncSender<ChunkMsg>>> = Vec::with_capacity(stages_len + 1);
+    let mut rxs: Vec<Option<mpsc::Receiver<ChunkMsg>>> = Vec::with_capacity(stages_len + 1);
     for _ in 0..=stages_len {
         let (tx, rx) = mpsc::sync_channel::<ChunkMsg>(PIPELINE_CHANNEL_CAPACITY);
         txs.push(Some(tx));
@@ -574,7 +582,7 @@ fn execute_fused_parallel(
                                 return;
                             }
                         }
-                    },
+                    }
                     Ok(Err(e)) => {
                         let _ = tx.send(Err(e));
                         return;
@@ -614,9 +622,9 @@ fn execute_fused_parallel(
 
     let mut final_output: Vec<u8> = Vec::new();
     let mut pipe_err: Option<HexForgeError> = None;
-    let final_rx = rxs[stages_len].take().ok_or_else(|| {
-        HexForgeError::internal("final receiver already taken (logic bug)")
-    })?;
+    let final_rx = rxs[stages_len]
+        .take()
+        .ok_or_else(|| HexForgeError::internal("final receiver already taken (logic bug)"))?;
     while let Ok(msg) = final_rx.recv() {
         match msg {
             Ok((piece, is_last)) => {
@@ -650,7 +658,6 @@ fn execute_fused_parallel(
     Ok(out)
 }
 
-
 /// Событие инвалидации (`graph://invalidated`, 05-IPC-CONTRACT.md §events):
 /// id узлов, чей кэшированный результат устарел после изменения графа.
 #[derive(Debug, Clone, Serialize)]
@@ -663,10 +670,7 @@ pub struct GraphInvalidatedEvent {
 /// если он новый или у него сменились operation@version/params/inputs.
 /// Stale = сам изменённый ∪ всё достижимое из него по исходящим рёбрам
 /// НОВОГО графа (FR-1.6: точечная инвалидация без пересчёта всего графа).
-pub fn compute_invalidated(
-    old: &hexforge_core::Graph,
-    new: &hexforge_core::Graph,
-) -> Vec<String> {
+pub fn compute_invalidated(old: &hexforge_core::Graph, new: &hexforge_core::Graph) -> Vec<String> {
     fn fingerprint(n: &hexforge_core::OperationNode) -> String {
         format!(
             "{}@{}::{:?}::{:?}",
@@ -674,8 +678,11 @@ pub fn compute_invalidated(
         )
     }
 
-    let old_fp: std::collections::HashMap<NodeId, String> =
-        old.nodes.iter().map(|(id, n)| (*id, fingerprint(n))).collect();
+    let old_fp: std::collections::HashMap<NodeId, String> = old
+        .nodes
+        .iter()
+        .map(|(id, n)| (*id, fingerprint(n)))
+        .collect();
 
     let mut changed: Vec<NodeId> = Vec::new();
     for (id, n) in new.nodes.iter() {
@@ -725,11 +732,7 @@ pub fn compute_invalidated_for_source(
     stale.into_iter().collect()
 }
 
-fn emit_progress(
-    on_progress: ProgressSink<'_>,
-    node_id: &NodeId,
-    bytes_processed: usize,
-) {
+fn emit_progress(on_progress: ProgressSink<'_>, node_id: &NodeId, bytes_processed: usize) {
     on_progress(&ProgressEvent {
         node_id: node_id.to_string(),
         bytes_processed: bytes_processed as u64,
@@ -755,11 +758,7 @@ pub fn replay_snapshot(
 ) -> HexForgeResult<Arc<Vec<u8>>> {
     let lineage: Vec<hexforge_core::Snapshot> = {
         let history = state.history.read();
-        history
-            .lineage(snapshot_id)
-            .into_iter()
-            .cloned()
-            .collect()
+        history.lineage(snapshot_id).into_iter().cloned().collect()
     };
     let Some(first) = lineage.first() else {
         return Err(HexForgeError::invalid_input(format!(
@@ -788,18 +787,19 @@ pub fn replay_snapshot(
                 "cannot replay snapshot: its root snapshot is not a source node",
             ));
         }
-        let handle_str =
-            node.params
-                .get("sourceHandle")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| {
-                    HexForgeError::invalid_parameter(
-                        "sourceHandle",
-                        "root node of the lineage requires params.sourceHandle",
-                    )
-                })?;
-        let handle = Uuid::parse_str(handle_str)
-            .map_err(|_| HexForgeError::invalid_input(format!("'{handle_str}' is not a valid source handle")))?;
+        let handle_str = node
+            .params
+            .get("sourceHandle")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                HexForgeError::invalid_parameter(
+                    "sourceHandle",
+                    "root node of the lineage requires params.sourceHandle",
+                )
+            })?;
+        let handle = Uuid::parse_str(handle_str).map_err(|_| {
+            HexForgeError::invalid_input(format!("'{handle_str}' is not a valid source handle"))
+        })?;
         let sources = state.sources.read();
         let entry = sources.get(&handle).ok_or_else(|| {
             HexForgeError::invalid_input(format!(
@@ -925,7 +925,11 @@ pub(crate) fn record_output(
 
 /// FR-4.3: diff между двумя снапшотами — байтовый/строчный diff их выходов.
 /// Возвращает текстовый diff; "equal\n" если выходы идентичны.
-pub fn diff_snapshots(state: &AppState, a: hexforge_core::SnapshotId, b: hexforge_core::SnapshotId) -> HexForgeResult<String> {
+pub fn diff_snapshots(
+    state: &AppState,
+    a: hexforge_core::SnapshotId,
+    b: hexforge_core::SnapshotId,
+) -> HexForgeResult<String> {
     let out_a = replay_snapshot(state, a)?;
     let out_b = replay_snapshot(state, b)?;
     if out_a == out_b {
@@ -949,8 +953,16 @@ pub fn diff_snapshots(state: &AppState, a: hexforge_core::SnapshotId, b: hexforg
     }
     if out.lines().count() <= 2 {
         // Бинарный fallback: первый различающийся байт
-        let pos = out_a.iter().zip(out_b.iter()).position(|(x, y)| x != y).unwrap_or(0);
-        out.push_str(&format!("binary diff at offset 0x{pos:08x}: {:02x?} vs {:02x?}\n", out_a.get(pos).copied(), out_b.get(pos).copied()));
+        let pos = out_a
+            .iter()
+            .zip(out_b.iter())
+            .position(|(x, y)| x != y)
+            .unwrap_or(0);
+        out.push_str(&format!(
+            "binary diff at offset 0x{pos:08x}: {:02x?} vs {:02x?}\n",
+            out_a.get(pos).copied(),
+            out_b.get(pos).copied()
+        ));
         out.push_str(&format!("lengths: {} vs {}\n", out_a.len(), out_b.len()));
     }
     Ok(out)
@@ -959,13 +971,13 @@ pub fn diff_snapshots(state: &AppState, a: hexforge_core::SnapshotId, b: hexforg
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
     use crate::error::HexForgeErrorKind;
     use crate::state::{AppState, SourceEntry};
     use base64::{engine::general_purpose, Engine as _};
-    use hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES;
-    use std::sync::atomic::AtomicBool;
     use hexforge_core::{ByteView, TransformError};
+    use hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES;
+    use serde_json::json;
+    use std::sync::atomic::AtomicBool;
 
     fn no_progress(_event: &super::ProgressEvent) {}
 
@@ -974,7 +986,10 @@ mod tests {
     }
 
     fn root_node(state: &AppState, literal: &[u8], op: &str) -> NodeId {
-        let handle = state.sources.write().insert(SourceEntry::InMemory(literal.to_vec()));
+        let handle = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(literal.to_vec()));
         let id = NodeId::new_v4();
         state.graph.write().insert_node(OperationNode {
             id,
@@ -1015,7 +1030,12 @@ mod tests {
     fn chunked_path_handles_multi_chunk_input() {
         // Вход больше DEFAULT_CHUNK_SIZE_BYTES форсирует несколько apply_chunk;
         // результат обязан совпасть с одноразовым apply (байто-независимые ops).
-        let big: Vec<u8> = b"aBcDeF".iter().copied().cycle().take(DEFAULT_CHUNK_SIZE_BYTES + 777).collect();
+        let big: Vec<u8> = b"aBcDeF"
+            .iter()
+            .copied()
+            .cycle()
+            .take(DEFAULT_CHUNK_SIZE_BYTES + 777)
+            .collect();
         let state = AppState::new(hexforge_ops::build_registry());
         let root = root_node(&state, &big, "text.rot13");
 
@@ -1147,14 +1167,19 @@ mod tests {
 
     #[test]
     fn merge_concat_executes_two_branches_in_order() {
-
         // Ветка A: hex.decode("4865") => "He"
         // Ветка B: rot13("y!")     => "l!"
         // concat([A, B])           => "Hel!"  (порядок inputs значим)
         // base64 сверху            => контрактный результат цепочки.
         let state = AppState::new(hexforge_ops::build_registry());
-        let ha = state.sources.write().insert(SourceEntry::InMemory(b"4865".to_vec()));
-        let hb = state.sources.write().insert(SourceEntry::InMemory(b"y!".to_vec()));
+        let ha = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"4865".to_vec()));
+        let hb = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"y!".to_vec()));
 
         let na = NodeId::new_v4();
         let nb = NodeId::new_v4();
@@ -1201,7 +1226,10 @@ mod tests {
     #[test]
     fn multi_input_without_merge_transform_rejected() {
         let state = AppState::new(hexforge_ops::build_registry());
-        let h = state.sources.write().insert(SourceEntry::InMemory(b"a".to_vec()));
+        let h = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"a".to_vec()));
         let b1 = root_node(&state, b"one", "text.rot13");
         let b2 = root_node(&state, b"two", "text.rot13");
         let bad = NodeId::new_v4();
@@ -1245,8 +1273,7 @@ mod tests {
     #[test]
     fn replay_fails_for_unknown_snapshot() {
         let state = AppState::new(hexforge_ops::build_registry());
-        let err =
-            replay_snapshot(&state, hexforge_core::SnapshotId::new_v4()).unwrap_err();
+        let err = replay_snapshot(&state, hexforge_core::SnapshotId::new_v4()).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
         assert!(err.message.contains("unknown snapshot"));
     }
@@ -1269,7 +1296,10 @@ mod tests {
             let mut sources = state.sources.write();
             let node = state.graph.read().nodes.get(&root).cloned().unwrap();
             let h = Uuid::parse_str(
-                node.params.get("sourceHandle").and_then(|v| v.as_str()).unwrap(),
+                node.params
+                    .get("sourceHandle")
+                    .and_then(|v| v.as_str())
+                    .unwrap(),
             )
             .unwrap();
             sources.replace(h, SourceEntry::InMemory(b"hacked!!".to_vec()));
@@ -1277,7 +1307,9 @@ mod tests {
 
         let err = replay_snapshot(&state, snap_id).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
-        assert!(err.message.contains("no longer match the recorded input hash"));
+        assert!(err
+            .message
+            .contains("no longer match the recorded input hash"));
     }
 
     fn rot13(data: &[u8]) -> Vec<u8> {
@@ -1378,8 +1410,9 @@ mod tests {
     fn cancellation_reaches_transform_context_mid_apply() {
         let mut state = AppState::new(hexforge_ops::build_registry());
         let armed = Arc::new(AtomicBool::new(false));
-        let op: &'static CancelAwareOp =
-            Box::leak(Box::new(CancelAwareOp { armed: Arc::clone(&armed) }));
+        let op: &'static CancelAwareOp = Box::leak(Box::new(CancelAwareOp {
+            armed: Arc::clone(&armed),
+        }));
         state.registry.register(op);
         let root = root_node(&state, &[0u8; 4096], "test.cancel-aware");
 
@@ -1472,13 +1505,13 @@ mod tests {
         // параллельный конвейер. Отмена выставляется наблюдателем ПОСЛЕ входа
         // в apply второй стадии; ошибка обязана прийти из операции через
         // канал, а не от чекпоинта планировщика.
-        let big: Vec<u8> =
-            vec![7u8; hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES + 999];
+        let big: Vec<u8> = vec![7u8; hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES + 999];
 
         let mut state = AppState::new(hexforge_ops::build_registry());
         let armed = Arc::new(AtomicBool::new(false));
-        let op: &'static CancelAwareStreamOp =
-            Box::leak(Box::new(CancelAwareStreamOp { armed: Arc::clone(&armed) }));
+        let op: &'static CancelAwareStreamOp = Box::leak(Box::new(CancelAwareStreamOp {
+            armed: Arc::clone(&armed),
+        }));
         state.registry.register(op);
 
         let root = root_node(&state, &big, "text.rot13");
@@ -1536,7 +1569,12 @@ mod tests {
         assert_eq!(out.as_slice(), expected_hex.as_slice());
     }
 
-    fn mk_node(id: NodeId, op: &str, params: serde_json::Value, inputs: Vec<NodeId>) -> OperationNode {
+    fn mk_node(
+        id: NodeId,
+        op: &str,
+        params: serde_json::Value,
+        inputs: Vec<NodeId>,
+    ) -> OperationNode {
         OperationNode {
             id,
             operation_id: op.into(),
@@ -1593,9 +1631,8 @@ mod tests {
     #[test]
     fn compute_invalidates_new_and_op_changed_but_not_identical() {
         let (a, b) = (NodeId::new_v4(), NodeId::new_v4());
-        let old = hexforge_core::Graph::from_nodes(vec![
-            mk_node(a, "text.rot13", json!({}), vec![]),
-        ]);
+        let old =
+            hexforge_core::Graph::from_nodes(vec![mk_node(a, "text.rot13", json!({}), vec![])]);
         // b — новый узел; a не изменился.
         let new = hexforge_core::Graph::from_nodes(vec![
             mk_node(a, "text.rot13", json!({}), vec![]),
@@ -1747,7 +1784,10 @@ mod tests {
             let history = state.history.read();
             assert_eq!(history.order.len(), 2);
             let snaps = history.ordered_snapshots();
-            assert_eq!(snaps[0].output_content_hash, Some(snaps[1].input_content_hash));
+            assert_eq!(
+                snaps[0].output_content_hash,
+                Some(snaps[1].input_content_hash)
+            );
         }
 
         // Кэш: только финальная стадия материализуется и пишется; повторный
@@ -1756,10 +1796,12 @@ mod tests {
         execute_chain(&state, &enc, &token(), &no_progress).unwrap();
         let cache = state.cache.lock();
         assert_eq!(cache.hits, 0);
-        assert_eq!(cache.misses, 0, "fusion исполняется без чтения кэша (trade-off)");
+        assert_eq!(
+            cache.misses, 0,
+            "fusion исполняется без чтения кэша (trade-off)"
+        );
         // Но запись в кэше есть — ею воспользуется НЕ-слитный путь
         // (например merge/не-streamable потребитель через get()).
         assert_eq!(cache.entries_len(), 1);
     }
-
 }

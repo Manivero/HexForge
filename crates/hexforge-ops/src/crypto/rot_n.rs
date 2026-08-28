@@ -53,13 +53,12 @@ impl Transform for RotN {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let n = params
-            .get("n")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| TransformError::InvalidParameter {
+        let n = params.get("n").and_then(|v| v.as_u64()).ok_or_else(|| {
+            TransformError::InvalidParameter {
                 field: "n".into(),
                 reason: "integer parameter 'n' (0–25) is required".into(),
-            })?;
+            }
+        })?;
         if n > 25 {
             return Err(TransformError::InvalidParameter {
                 field: "n".into(),
@@ -96,7 +95,11 @@ mod tests {
     fn rot_n_0_is_identity() {
         let ctx = NullExecutionContext;
         let out = RotN
-            .apply(Cow::Borrowed(b"Test 123!"), &serde_json::json!({ "n": 0 }), &ctx)
+            .apply(
+                Cow::Borrowed(b"Test 123!"),
+                &serde_json::json!({ "n": 0 }),
+                &ctx,
+            )
             .unwrap();
         assert_eq!(out.as_ref(), b"Test 123!");
     }
@@ -127,11 +130,7 @@ mod tests {
     fn invalid_n_rejected() {
         let ctx = NullExecutionContext;
         let err = RotN
-            .apply(
-                Cow::Borrowed(b"x"),
-                &serde_json::json!({ "n": 26 }),
-                &ctx,
-            )
+            .apply(Cow::Borrowed(b"x"), &serde_json::json!({ "n": 26 }), &ctx)
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }

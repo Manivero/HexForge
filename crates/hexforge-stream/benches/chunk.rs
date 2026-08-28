@@ -14,7 +14,12 @@ fn bench_chunk_ranges(c: &mut Criterion) {
 
 fn bench_chunk_64m(c: &mut Criterion) {
     c.bench_function("chunk_64M_default", |b| {
-        b.iter(|| chunk_ranges(black_box(64 * 1024 * 1024 + 12345), black_box(DEFAULT_CHUNK_SIZE_BYTES)))
+        b.iter(|| {
+            chunk_ranges(
+                black_box(64 * 1024 * 1024 + 12345),
+                black_box(DEFAULT_CHUNK_SIZE_BYTES),
+            )
+        })
     });
 }
 

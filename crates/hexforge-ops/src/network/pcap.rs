@@ -1,4 +1,6 @@
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use std::borrow::Cow;
 
 pub struct PcapInfo;
@@ -17,23 +19,42 @@ impl Transform for PcapInfo {
         "Network"
     }
     fn capabilities(&self) -> TransformCapabilities {
-        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::FullBuffer }
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::FullBuffer,
+        }
     }
-    fn apply<'a>(&self, input: ByteView<'a>, _params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
+    fn apply<'a>(
+        &self,
+        input: ByteView<'a>,
+        _params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
         let data = input.as_ref();
         if data.len() < 24 {
-            return Err(TransformError::InvalidInput { reason: "too short for PCAP global header (need 24 bytes)".into() });
+            return Err(TransformError::InvalidInput {
+                reason: "too short for PCAP global header (need 24 bytes)".into(),
+            });
         }
         // Determine endianness via magic
         let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
         let le = match magic {
             0xd4c3b2a1 => true,  // little endian
             0xa1b2c3d4 => false, // big endian
-            _ => return Err(TransformError::InvalidInput { reason: format!("invalid PCAP magic 0x{magic:08x}") }),
+            _ => {
+                return Err(TransformError::InvalidInput {
+                    reason: format!("invalid PCAP magic 0x{magic:08x}"),
+                })
+            }
         };
         let read_u32 = |off: usize| -> u32 {
-            let b = [data[off], data[off+1], data[off+2], data[off+3]];
-            if le { u32::from_le_bytes(b) } else { u32::from_be_bytes(b) }
+            let b = [data[off], data[off + 1], data[off + 2], data[off + 3]];
+            if le {
+                u32::from_le_bytes(b)
+            } else {
+                u32::from_be_bytes(b)
+            }
         };
         let version_major = if le {
             u16::from_le_bytes([data[4], data[5]])
@@ -62,7 +83,9 @@ impl Transform for PcapInfo {
             }
             packet_count += 1;
             total_incl += incl_len as u64;
-            if incl_len > max_incl { max_incl = incl_len; }
+            if incl_len > max_incl {
+                max_incl = incl_len;
+            }
             offset += 16 + incl_len as usize;
         }
         let out = serde_json::json!({
@@ -72,7 +95,8 @@ impl Transform for PcapInfo {
             "total_bytes": total_incl,
             "max_packet_size": max_incl,
         });
-        let pretty = serde_json::to_string_pretty(&out).map_err(|e| TransformError::Internal(e.to_string()))?;
+        let pretty = serde_json::to_string_pretty(&out)
+            .map_err(|e| TransformError::Internal(e.to_string()))?;
         Ok(Cow::Owned(pretty.into_bytes()))
     }
 }
@@ -107,7 +131,9 @@ mod tests {
     fn parses_single_packet() {
         let ctx = NullExecutionContext;
         let pcap = make_pcap(b"hello");
-        let out = PcapInfo.apply(Cow::Borrowed(&pcap), &serde_json::json!({}), &ctx).unwrap();
+        let out = PcapInfo
+            .apply(Cow::Borrowed(&pcap), &serde_json::json!({}), &ctx)
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
         assert_eq!(v["packet_count"], 1);
         assert_eq!(v["endian"], "little");
@@ -116,7 +142,9 @@ mod tests {
     #[test]
     fn rejects_invalid_magic() {
         let ctx = NullExecutionContext;
-        let err = PcapInfo.apply(Cow::Borrowed(b"not a pcap"), &serde_json::json!({}), &ctx).unwrap_err();
+        let err = PcapInfo
+            .apply(Cow::Borrowed(b"not a pcap"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
     }
 
@@ -131,7 +159,9 @@ mod tests {
         hdr.extend_from_slice(&0u32.to_le_bytes());
         hdr.extend_from_slice(&65535u32.to_le_bytes());
         hdr.extend_from_slice(&1u32.to_le_bytes());
-        let out = PcapInfo.apply(Cow::Borrowed(&hdr), &serde_json::json!({}), &ctx).unwrap();
+        let out = PcapInfo
+            .apply(Cow::Borrowed(&hdr), &serde_json::json!({}), &ctx)
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(out.as_ref()).unwrap();
         assert_eq!(v["packet_count"], 0);
     }

@@ -2,7 +2,7 @@
 //! (PRD §3.6, NFR-9). Implements Wasmtime runtime with fuel limits,
 //! capability sandbox, and Ed25519 manifest verification.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -98,8 +98,8 @@ impl PluginRuntime {
         }
 
         // 2. Parse manifest
-        let manifest: PluginManifest = serde_json::from_slice(manifest_bytes)
-            .context("Failed to parse manifest JSON")?;
+        let manifest: PluginManifest =
+            serde_json::from_slice(manifest_bytes).context("Failed to parse manifest JSON")?;
 
         // 3. Validate WASM module exists
         if !wasm_path.exists() {
@@ -107,8 +107,7 @@ impl PluginRuntime {
         }
 
         // 4. Capability check — privileged caps must be granted
-        Self::check_capabilities(&manifest)
-            .map_err(|e| anyhow!(e))?;
+        Self::check_capabilities(&manifest).map_err(|e| anyhow!(e))?;
 
         Ok(PluginInstance {
             manifest,
@@ -119,19 +118,14 @@ impl PluginRuntime {
     }
 
     /// Executes a plugin with fuel metering and capability sandbox
-    /// 
+    ///
     /// Uses Wasmtime with `consume_fuel(true)` so infinite loops are bounded
     /// by `self.fuel_limit` (NFR-9). Panics in WASM are isolated as traps,
     /// never unwinding the host (profile `panic = "unwind"` ensures host
     /// survives plugin panic as defined in Cargo.toml).
-    pub fn execute(
-        &self,
-        instance: &PluginInstance,
-        input: &[u8],
-    ) -> Result<Vec<u8>> {
+    pub fn execute(&self, instance: &PluginInstance, input: &[u8]) -> Result<Vec<u8>> {
         // 1. Capability sandbox — re-check before execution (defense in depth)
-        Self::check_capabilities(&instance.manifest)
-            .map_err(|e| anyhow!(e))?;
+        Self::check_capabilities(&instance.manifest).map_err(|e| anyhow!(e))?;
 
         // 2. Load and validate WASM module with fuel metering
         let mut config = wasmtime::Config::new();
@@ -141,33 +135,40 @@ impl PluginRuntime {
         // Ensure deterministic execution
         config.cranelift_opt_level(wasmtime::OptLevel::Speed);
 
-        let engine = wasmtime::Engine::new(&config)
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("engine creation failed: {e}"))))?;
+        let engine = wasmtime::Engine::new(&config).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "engine creation failed: {e}"
+            )))
+        })?;
 
         let mut store = wasmtime::Store::new(&engine, ());
         store
             .set_fuel(self.fuel_limit)
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("fuel set failed: {e}"))))?;
 
-        let module = wasmtime::Module::from_file(&engine, &instance.wasm_path)
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("module load failed: {e}"))))?;
+        let module = wasmtime::Module::from_file(&engine, &instance.wasm_path).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "module load failed: {e}"
+            )))
+        })?;
 
         // Try to instantiate — modules requiring imports not in our sandbox will fail here
         let linker = wasmtime::Linker::new(&engine);
-        let wasm_instance = linker
-            .instantiate(&mut store, &module)
-            .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("fuel") || msg.contains("out of fuel") || msg.contains("all fuel consumed") {
-                    anyhow!(PluginError::WasmtimeError(
-                        "fuel exhausted during instantiation (possible infinite loop)".into()
-                    ))
-                } else {
-                    anyhow!(PluginError::WasmtimeError(format!(
-                        "instantiation failed (sandbox denied or missing imports): {e}"
-                    )))
-                }
-            })?;
+        let wasm_instance = linker.instantiate(&mut store, &module).map_err(|e| {
+            let msg = e.to_string();
+            if msg.contains("fuel")
+                || msg.contains("out of fuel")
+                || msg.contains("all fuel consumed")
+            {
+                anyhow!(PluginError::WasmtimeError(
+                    "fuel exhausted during instantiation (possible infinite loop)".into()
+                ))
+            } else {
+                anyhow!(PluginError::WasmtimeError(format!(
+                    "instantiation failed (sandbox denied or missing imports): {e}"
+                )))
+            }
+        })?;
 
         // Attempt to call exported `run` or `_start` if present — this exercises fuel metering
         // For MVP, plugins are expected to export `run` with `() -> ()` or `transform` with memory semantics.
@@ -178,7 +179,10 @@ impl PluginRuntime {
                 let res = func.call(&mut store, ());
                 if let Err(e) = res {
                     let msg = e.to_string();
-                    if msg.contains("fuel") || msg.contains("all fuel consumed") || msg.contains("out of fuel") {
+                    if msg.contains("fuel")
+                        || msg.contains("all fuel consumed")
+                        || msg.contains("out of fuel")
+                    {
                         return Err(anyhow!(PluginError::WasmtimeError(
                             "fuel exhausted: infinite loop or heavy compute (NFR-9)".into()
                         )));
@@ -208,32 +212,55 @@ impl PluginRuntime {
     }
 
     /// Attempts to execute with explicit capability grant (for UI `grant_capability`)
-    pub fn grant_capability(instance: &mut PluginInstance, capability: &str) -> Result<(), PluginError> {
-        if !instance.manifest.requested_capabilities.contains(&capability.to_string()) {
+    pub fn grant_capability(
+        instance: &mut PluginInstance,
+        capability: &str,
+    ) -> Result<(), PluginError> {
+        if !instance
+            .manifest
+            .requested_capabilities
+            .contains(&capability.to_string())
+        {
             return Err(PluginError::CapabilityDenied(format!(
                 "capability '{capability}' not requested by manifest"
             )));
         }
-        if !instance.manifest.granted_capabilities.contains(&capability.to_string()) {
-            instance.manifest.granted_capabilities.push(capability.to_string());
+        if !instance
+            .manifest
+            .granted_capabilities
+            .contains(&capability.to_string())
+        {
+            instance
+                .manifest
+                .granted_capabilities
+                .push(capability.to_string());
         }
         Ok(())
     }
 
     pub fn revoke_capability(instance: &mut PluginInstance, capability: &str) {
-        instance.manifest.granted_capabilities.retain(|c| c != capability);
+        instance
+            .manifest
+            .granted_capabilities
+            .retain(|c| c != capability);
     }
 }
 
 /// Verifies Ed25519 signature of `manifest_bytes` against `signature_hex` and `pubkey_hex`.
-pub fn verify_signature(manifest_bytes: &[u8], signature_hex: &str, pubkey_hex: &str) -> Result<bool, PluginError> {
+pub fn verify_signature(
+    manifest_bytes: &[u8],
+    signature_hex: &str,
+    pubkey_hex: &str,
+) -> Result<bool, PluginError> {
     let sig_bytes = hex::decode(signature_hex.trim())
         .map_err(|e| PluginError::InvalidSignature(e.to_string()))?;
-    let pk_bytes = hex::decode(pubkey_hex.trim())
-        .map_err(|e| PluginError::InvalidPublicKey(e.to_string()))?;
-    let pk_arr: [u8; 32] = pk_bytes.try_into()
+    let pk_bytes =
+        hex::decode(pubkey_hex.trim()).map_err(|e| PluginError::InvalidPublicKey(e.to_string()))?;
+    let pk_arr: [u8; 32] = pk_bytes
+        .try_into()
         .map_err(|_| PluginError::InvalidPublicKey("pubkey must be 32 bytes".into()))?;
-    let sig_arr: [u8; 64] = sig_bytes.try_into()
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
         .map_err(|_| PluginError::InvalidSignature("signature must be 64 bytes".into()))?;
     let vk = VerifyingKey::from_bytes(&pk_arr)
         .map_err(|e| PluginError::InvalidPublicKey(e.to_string()))?;
@@ -270,7 +297,10 @@ mod tests {
     #[test]
     fn rejects_malformed_keys() {
         let err = verify_signature(b"msg", "00", "00").unwrap_err();
-        assert!(matches!(err, PluginError::InvalidSignature(_) | PluginError::InvalidPublicKey(_)));
+        assert!(matches!(
+            err,
+            PluginError::InvalidSignature(_) | PluginError::InvalidPublicKey(_)
+        ));
     }
 
     #[test]
@@ -298,14 +328,22 @@ mod tests {
         std::fs::write(&wasm_path, wat::parse_str("(module)").unwrap()).unwrap();
 
         // Valid signature should succeed
-        let inst = runtime.install(&wasm_path, manifest, &sig_hex, &pk_hex).unwrap();
+        let inst = runtime
+            .install(&wasm_path, manifest, &sig_hex, &pk_hex)
+            .unwrap();
         assert_eq!(inst.manifest.id, "test.plugin");
 
         // Tampered manifest with same signature should fail
-        let tampered = br#"{"id":"test.plugin","name":"Tampered","version":"1.0.0","author":"Test"}"#;
-        let err = runtime.install(&wasm_path, tampered, &sig_hex, &pk_hex).unwrap_err();
+        let tampered =
+            br#"{"id":"test.plugin","name":"Tampered","version":"1.0.0","author":"Test"}"#;
+        let err = runtime
+            .install(&wasm_path, tampered, &sig_hex, &pk_hex)
+            .unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("InvalidSignature") || msg.contains("signature"), "expected signature error, got {msg}");
+        assert!(
+            msg.contains("InvalidSignature") || msg.contains("signature"),
+            "expected signature error, got {msg}"
+        );
 
         let _ = std::fs::remove_file(&wasm_path);
     }
@@ -321,7 +359,12 @@ mod tests {
         let sig_hex = hex::encode(sig.to_bytes());
         let pk_hex = hex::encode(vk.to_bytes());
         let err = runtime
-            .install(Path::new("/nonexistent/path.wasm"), manifest, &sig_hex, &pk_hex)
+            .install(
+                Path::new("/nonexistent/path.wasm"),
+                manifest,
+                &sig_hex,
+                &pk_hex,
+            )
             .unwrap_err();
         assert!(err.to_string().contains("WASM file not found"));
     }
@@ -342,8 +385,13 @@ mod tests {
         let wasm_path = dir.join(format!("hexforge-test-cap-{}.wasm", uuid::Uuid::new_v4()));
         std::fs::write(&wasm_path, wat::parse_str("(module)").unwrap()).unwrap();
 
-        let err = runtime.install(&wasm_path, manifest_bytes, &sig_hex, &pk_hex).unwrap_err();
-        assert!(err.to_string().contains("capability") || err.to_string().contains("CapabilityDenied"), "got {err}");
+        let err = runtime
+            .install(&wasm_path, manifest_bytes, &sig_hex, &pk_hex)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("capability") || err.to_string().contains("CapabilityDenied"),
+            "got {err}"
+        );
 
         // Grant and retry should succeed
         let mut manifest: PluginManifest = serde_json::from_str(manifest_json).unwrap();
@@ -351,7 +399,9 @@ mod tests {
         let new_json = serde_json::to_vec(&manifest).unwrap();
         let new_sig = sk.sign(&new_json);
         let new_sig_hex = hex::encode(new_sig.to_bytes());
-        let inst = runtime.install(&wasm_path, &new_json, &new_sig_hex, &pk_hex).unwrap();
+        let inst = runtime
+            .install(&wasm_path, &new_json, &new_sig_hex, &pk_hex)
+            .unwrap();
         assert_eq!(inst.manifest.granted_capabilities, vec!["filesystem_read"]);
 
         let _ = std::fs::remove_file(&wasm_path);
@@ -438,7 +488,10 @@ mod tests {
             signature_hex: "".into(),
         };
         let err = runtime.execute(&instance, b"input").unwrap_err();
-        assert!(err.to_string().contains("trap") || err.to_string().contains("wasmtime"), "got {err}");
+        assert!(
+            err.to_string().contains("trap") || err.to_string().contains("wasmtime"),
+            "got {err}"
+        );
         // Host still alive — can run another plugin
         let wasm_path2 = dir.join(format!("hexforge-test-echo2-{}.wasm", uuid::Uuid::new_v4()));
         std::fs::write(&wasm_path2, wat::parse_str("(module)").unwrap()).unwrap();
