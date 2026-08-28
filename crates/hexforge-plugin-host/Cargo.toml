@@ -16,3 +16,5 @@ rand = "0.8"
 wasmtime = { version = "48", features = ["cranelift", "component-model-async", "component-model"] }
 wasi = { version = "0.14", features = ["core"] }
 anyhow = "1"
+wat = "1"
+uuid = { workspace = true }

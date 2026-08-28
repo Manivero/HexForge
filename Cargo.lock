@@ -2094,8 +2094,10 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "uuid",
  "wasi 0.14.4+wasi-0.2.4",
  "wasmtime",
+ "wat",
 ]
 
 [[package]]
