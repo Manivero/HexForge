@@ -2009,6 +2009,7 @@ dependencies = [
  "hexforge-core",
  "hexforge-engine",
  "hexforge-ops",
+ "memmap2",
  "serde_json",
  "uuid",
 ]

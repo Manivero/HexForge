@@ -76,11 +76,40 @@ pub fn run_recipe(
         return Err("recipe has no source nodes (nodes without inputs)".into());
     }
 
-    let input_bytes =
-        std::fs::read(in_path).map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
+    // NFR-2: для файлов >16MiB используем mmap вместо полной загрузки в RAM (constant memory)
+    // Для маленьких файлов оставляем InMemory (быстрее, проще). Fallback на read если mmap не удался
+    // (например, пустой файл на Windows или pipe).
+    let input_handle = {
+        let file = std::fs::File::open(in_path)
+            .map_err(|e| format!("cannot open input '{in_path}': {e}"))?;
+        let meta = file
+            .metadata()
+            .map_err(|e| format!("cannot stat input '{in_path}': {e}"))?;
+        if meta.len() > 16 * 1024 * 1024 {
+            match unsafe { memmap2::Mmap::map(&file) } {
+                Ok(mmap) => {
+                    let mut sources = state.sources.write();
+                    sources.insert(SourceEntry::Mapped(mmap))
+                }
+                Err(_) => {
+                    let bytes = std::fs::read(in_path)
+                        .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
+                    let mut sources = state.sources.write();
+                    sources.insert(SourceEntry::InMemory(bytes))
+                }
+            }
+        } else if meta.len() == 0 {
+            let mut sources = state.sources.write();
+            sources.insert(SourceEntry::InMemory(Vec::new()))
+        } else {
+            let bytes = std::fs::read(in_path)
+                .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
+            let mut sources = state.sources.write();
+            sources.insert(SourceEntry::InMemory(bytes))
+        }
+    };
     {
-        let mut sources = state.sources.write();
-        let handle = sources.insert(SourceEntry::InMemory(input_bytes));
+        let handle = input_handle;
         for root_id in &roots {
             // ВАЖНО: read-guard ограничен блоком; if let со скрутини-временем
             // протянул бы его через graph.write() ниже → дедлок на том же треде.
