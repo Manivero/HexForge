@@ -430,9 +430,12 @@ pub async fn run_node(
     .await
     .map_err(|e| HexForgeError::internal(format!("node execution worker failed: {e}")))??;
 
-    // FR-1.6: preview_only=false — прогреваем downstream кэш (мгновенное превью
-    // при переключении узлов). Ошибки прогрева игнорируются — главный результат
-    // уже получен; отмена проверяется между узлами.
+    // FR-1.6: preview_only=false — прогреваем downstream кэш конкурентно
+    // (мгновенное превью при переключении узлов). Ранее warming был
+    // последовательным (`for ... spawn_blocking().await`), что для fork-графов
+    // с N ветвями давало N× latency. Теперь все downstream узлы прогреваются
+    // параллельно через blocking-пул, ошибки игнорируются, отмена проверяется
+    // до спауна и между join.
     if !req.preview_only {
         let downstream: Vec<Uuid> = {
             let g = exec_state.graph.read().clone();
@@ -441,20 +444,28 @@ pub async fn run_node(
                 .filter(|id| *id != node_id)
                 .collect()
         };
-        for down_id in downstream {
-            if token.load(Ordering::Relaxed) {
-                break;
+        if !downstream.is_empty() {
+            let mut handles = Vec::with_capacity(downstream.len());
+            for down_id in downstream {
+                if token.load(Ordering::Relaxed) {
+                    break;
+                }
+                let t_state = Arc::clone(&exec_state);
+                let t_token = Arc::clone(&token);
+                let app_clone = app.clone();
+                handles.push(tauri::async_runtime::spawn_blocking(move || {
+                    let on_progress = |event: &hexforge_engine::scheduler::ProgressEvent| {
+                        let _ = app_clone.emit("op://progress", event);
+                    };
+                    let _ = scheduler::execute_chain(&t_state, &down_id, &t_token, &on_progress);
+                }));
             }
-            let t_state = Arc::clone(&exec_state);
-            let t_token = Arc::clone(&token);
-            let app_clone = app.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                let on_progress = |event: &hexforge_engine::scheduler::ProgressEvent| {
-                    let _ = app_clone.emit("op://progress", event);
-                };
-                let _ = scheduler::execute_chain(&t_state, &down_id, &t_token, &on_progress);
-            })
-            .await;
+            for h in handles {
+                let _ = h.await;
+                if token.load(Ordering::Relaxed) {
+                    break;
+                }
+            }
         }
     }
 

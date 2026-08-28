@@ -244,7 +244,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **Crypto AES modes** — ECB/CBC/CTR (PKCS7 for ECB/CBC, no padding for CTR), GCM and ChaCha20-Poly1305 done
 - **DNS parser hardened** — `network.dns_parse` with compression pointers, loop guards, 8 tests
 - **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
-- **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache; full concurrent downstream streaming pending
+- **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache concurrently via blocking pool (fork graphs parallel)
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
 - **Parallel streaming pipeline** — fusion + bounded channels (4×64 MiB = 256 MiB per stage) implemented per FR-5.2
 - **64 MB chunks implemented** — `DEFAULT_CHUNK_SIZE_BYTES = 64 MiB` for file I/O and `apply_chunk`
