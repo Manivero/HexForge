@@ -82,6 +82,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `regex_extract` | Regex extract matches (one per line) |
 | `regex_replace` | Regex replace with captures ($1) |
 | `unicode_normalize` | Unicode NFC/NFD/NFKC/NFKD |
+| `trim` | Trim whitespace (both/start/end) |
 | `reverse` | Byte-level reversal |
 | `rot13` | ROT13 substitution |
 
