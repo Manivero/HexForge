@@ -527,12 +527,12 @@ fn execute_fused_parallel(
     let mut handles = Vec::with_capacity(stages_len);
     for (i, stage_arc) in run.stages.iter().enumerate() {
         let stage = Arc::clone(stage_arc);
-        let rx = rxs[i]
-            .take()
-            .expect("each stage consumes its own receiver once");
-        let tx = txs[i + 1]
-            .take()
-            .expect("each stage owns its out-sender once");
+        let rx = rxs[i].take().ok_or_else(|| {
+            HexForgeError::internal("pipeline stage receiver already taken (logic bug)")
+        })?;
+        let tx = txs[i + 1].take().ok_or_else(|| {
+            HexForgeError::internal("pipeline stage sender already taken (logic bug)")
+        })?;
         let token = Arc::clone(token);
         handles.push(std::thread::spawn(move || {
             let ctx = RunContext { token };
@@ -603,7 +603,7 @@ fn execute_fused_parallel(
         ));
         let first_tx = txs[0]
             .as_ref()
-            .expect("main feed sender taken once");
+            .ok_or_else(|| HexForgeError::internal("main feed sender already taken"))?;
         if first_tx.send(msg).is_err() {
             break 'feed;
         }
@@ -614,9 +614,9 @@ fn execute_fused_parallel(
 
     let mut final_output: Vec<u8> = Vec::new();
     let mut pipe_err: Option<HexForgeError> = None;
-    let final_rx = rxs[stages_len]
-        .take()
-        .expect("final receiver taken once");
+    let final_rx = rxs[stages_len].take().ok_or_else(|| {
+        HexForgeError::internal("final receiver already taken (logic bug)")
+    })?;
     while let Ok(msg) = final_rx.recv() {
         match msg {
             Ok((piece, is_last)) => {
