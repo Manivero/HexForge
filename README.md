@@ -88,6 +88,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `unicode_normalize` | Unicode NFC/NFD/NFKC/NFKD |
 | `trim` | Trim whitespace (both/start/end) |
 | `remove_whitespace` | Remove all whitespace (streamable) |
+| `pad` | Pad to length (left/right/both, char) |
 | `reverse` | Byte-level reversal |
 | `rot13` | ROT13 substitution |
 
@@ -138,7 +139,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | Crate | Purpose |
 |-------|---------|
 | `hexforge-core` | Domain model: `Transform` trait, DAG graph, snapshots. Zero I/O. |
-| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (213 tests) |
+| `hexforge-ops` | Built-in operations implementing `Transform` via `inventory` (217 tests) |
 | `hexforge-stream` | Chunked I/O primitives (pure, no domain knowledge) — 64 MiB |
 | `hexforge-engine` | Execution engine: scheduler, cache (true LRU), cancellation, history, diff |
 | `hexforge-plugin-host` | Ed25519 manifest verify + Wasmtime fuel metering (NFR-9) + capability sandbox |

@@ -1,5 +1,6 @@
 pub mod case;
 pub mod html;
+pub mod pad;
 pub mod regex;
 pub mod reverse;
 pub mod rot13;
