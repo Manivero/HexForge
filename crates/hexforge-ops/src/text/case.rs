@@ -7,6 +7,73 @@ use hexforge_core::{
 };
 use std::borrow::Cow;
 
+fn split_words(s: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut prev_is_lower = false;
+    for c in s.chars() {
+        if c.is_ascii_alphanumeric() {
+            let is_upper = c.is_ascii_uppercase();
+            let is_lower = c.is_ascii_lowercase();
+            if is_upper && prev_is_lower && !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            cur.push(c.to_ascii_lowercase());
+            prev_is_lower = is_lower;
+        } else if c == ' ' || c == '-' || c == '_' || c == '.' {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            prev_is_lower = false;
+        } else {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            prev_is_lower = false;
+        }
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words.into_iter().filter(|w| !w.is_empty()).collect()
+}
+
+fn to_snake_case(s: &str) -> String {
+    split_words(s).join("_")
+}
+fn to_kebab_case(s: &str) -> String {
+    split_words(s).join("-")
+}
+fn to_camel_case(s: &str) -> String {
+    let words = split_words(s);
+    let mut out = String::new();
+    for (i, w) in words.into_iter().enumerate() {
+        if i == 0 {
+            out.push_str(&w);
+        } else {
+            let mut chars = w.chars();
+            if let Some(first) = chars.next() {
+                out.push(first.to_ascii_uppercase());
+                out.push_str(chars.as_str());
+            }
+        }
+    }
+    out
+}
+fn to_pascal_case(s: &str) -> String {
+    split_words(s)
+        .into_iter()
+        .map(|w| {
+            let mut chars = w.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
 pub struct CaseTransform;
 
 impl Transform for CaseTransform {
@@ -36,7 +103,7 @@ impl Transform for CaseTransform {
             "properties": {
                 "mode": {
                     "type": "string",
-                    "enum": ["upper", "lower", "title"],
+                    "enum": ["upper", "lower", "title", "snake", "kebab", "camel", "pascal"],
                     "default": "upper"
                 }
             }
@@ -59,7 +126,6 @@ impl Transform for CaseTransform {
             "upper" => input.iter().map(|&b| b.to_ascii_uppercase()).collect(),
             "lower" => input.iter().map(|&b| b.to_ascii_lowercase()).collect(),
             "title" => {
-                // Title case: первый буквенный символ каждого слова — uppercase.
                 let mut prev_alpha = false;
                 input
                     .iter()
@@ -77,10 +143,16 @@ impl Transform for CaseTransform {
                     })
                     .collect()
             }
+            "snake" => to_snake_case(&String::from_utf8_lossy(input.as_ref())).into_bytes(),
+            "kebab" => to_kebab_case(&String::from_utf8_lossy(input.as_ref())).into_bytes(),
+            "camel" => to_camel_case(&String::from_utf8_lossy(input.as_ref())).into_bytes(),
+            "pascal" => to_pascal_case(&String::from_utf8_lossy(input.as_ref())).into_bytes(),
             _ => {
                 return Err(TransformError::InvalidParameter {
                     field: "mode".into(),
-                    reason: format!("unknown mode '{mode}'; expected upper|lower|title"),
+                    reason: format!(
+                        "unknown mode '{mode}'; expected upper|lower|title|snake|kebab|camel|pascal"
+                    ),
                 })
             }
         };
@@ -181,5 +253,83 @@ mod tests {
             .apply(Cow::Borrowed(b"x"), &serde_json::json!({}), &ctx)
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
+    }
+
+    #[test]
+    fn snake_mode() {
+        let ctx = NullExecutionContext;
+        let cases = [
+            ("Hello World", "hello_world"),
+            ("hello-world", "hello_world"),
+            ("helloWorld", "hello_world"),
+            ("HelloWorld", "hello_world"),
+            ("  hello   world  ", "hello_world"),
+            ("", ""),
+        ];
+        for (input, expected) in cases {
+            let out = CaseTransform
+                .apply(
+                    Cow::Borrowed(input.as_bytes()),
+                    &serde_json::json!({"mode":"snake"}),
+                    &ctx,
+                )
+                .unwrap();
+            assert_eq!(out.as_ref(), expected.as_bytes(), "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn kebab_mode() {
+        let ctx = NullExecutionContext;
+        let out = CaseTransform
+            .apply(
+                Cow::Borrowed(b"Hello World Test"),
+                &serde_json::json!({"mode":"kebab"}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out.as_ref(), b"hello-world-test");
+    }
+
+    #[test]
+    fn camel_mode() {
+        let ctx = NullExecutionContext;
+        let out = CaseTransform
+            .apply(
+                Cow::Borrowed(b"hello world test"),
+                &serde_json::json!({"mode":"camel"}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out.as_ref(), b"helloWorldTest");
+        let out2 = CaseTransform
+            .apply(
+                Cow::Borrowed(b"Hello-world_test"),
+                &serde_json::json!({"mode":"camel"}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out2.as_ref(), b"helloWorldTest");
+    }
+
+    #[test]
+    fn pascal_mode() {
+        let ctx = NullExecutionContext;
+        let out = CaseTransform
+            .apply(
+                Cow::Borrowed(b"hello world"),
+                &serde_json::json!({"mode":"pascal"}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out.as_ref(), b"HelloWorld");
+        let out2 = CaseTransform
+            .apply(
+                Cow::Borrowed(b"hello-world_test"),
+                &serde_json::json!({"mode":"pascal"}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out2.as_ref(), b"HelloWorldTest");
     }
 }
