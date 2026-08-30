@@ -2,6 +2,7 @@ pub mod blake3;
 pub mod crc32;
 pub mod hmac;
 pub mod pbkdf2;
+pub mod scrypt;
 use blake2::{Blake2b512, Blake2s256};
 use digest::Digest;
 use hexforge_core::{

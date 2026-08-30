@@ -43,5 +43,6 @@ serde_yaml = "0.9"
 inventory = "0.3"
 hmac = "0.12"
 pbkdf2 = "0.12"
+scrypt = "0.11"
 
 [dev-dependencies]
