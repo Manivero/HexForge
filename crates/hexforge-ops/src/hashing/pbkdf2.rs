@@ -1,7 +1,7 @@
 //! `hashing.pbkdf2` — PBKDF2-HMAC key derivation (RFC 8018).
 //! Параметры `password`/`salt` — UTF-8 строки, `hash` ∈ {sha1,sha256,sha512},
-//! `iterations` ≥1 (default 1000), `length` 1..128 (default 32, hex-output
-//! удваивает размер). Входной `ByteView` игнорируется — ключ выводится
+//! `iterations` 1..1_000_000 (default 1000, DoS cap), `length` 1..128 (default 32,
+//! hex-output удваивает размер). Входной `ByteView` игнорируется — ключ выводится
 //! исключительно из параметров (детерминированная KDF).
 
 use hexforge_core::{
@@ -33,7 +33,7 @@ impl Transform for Pbkdf2Hash {
             "properties": {
                 "password": { "type": "string", "description": "Password (utf8)" },
                 "salt": { "type": "string", "description": "Salt (utf8)" },
-                "iterations": { "type": "integer", "minimum": 1, "default": 1000 },
+                "iterations": { "type": "integer", "minimum": 1, "maximum": 1000000, "default": 1000, "description": "Iterations (1..1_000_000, DoS cap)" },
                 "length": { "type": "integer", "minimum": 1, "maximum": 128, "default": 32 },
                 "hash": { "type": "string", "enum": ["sha1", "sha256", "sha512"], "default": "sha256" }
             }
@@ -84,6 +84,12 @@ impl Transform for Pbkdf2Hash {
             return Err(TransformError::InvalidParameter {
                 field: "iterations".into(),
                 reason: "must be >=1".into(),
+            });
+        }
+        if iterations > 1_000_000 {
+            return Err(TransformError::InvalidParameter {
+                field: "iterations".into(),
+                reason: "must be <=1_000_000 (DoS cap)".into(),
             });
         }
         let mut out = vec![0u8; length];
@@ -165,5 +171,20 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
+    }
+
+    #[test]
+    fn pbkdf2_iterations_cap() {
+        let ctx = NullExecutionContext;
+        let err = Pbkdf2Hash
+            .apply(
+                Cow::Borrowed(b""),
+                &serde_json::json!({"password":"p","salt":"s","iterations":1_000_001}),
+                &ctx,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, TransformError::InvalidParameter { field, .. } if field == "iterations")
+        );
     }
 }
