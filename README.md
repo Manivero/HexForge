@@ -51,6 +51,7 @@ Unlike CyberChef's linear recipe list, HexForge uses a directed acyclic graph (D
 | `sha3_256` | SHA3-256 hash |
 | `ssdeep` | SSDEEP fuzzy hash |
 | `hmac` | HMAC with key (md5/sha1/sha256/sha512/sha3_256, hexKey) |
+| `pbkdf2` | PBKDF2-HMAC key derivation (sha1/sha256/sha512, password/salt/iterations/length) |
 
 ### Cryptography
 | Operation | Description |

@@ -4,7 +4,9 @@
 //! удваивает размер). Входной `ByteView` игнорируется — ключ выводится
 //! исключительно из параметров (детерминированная KDF).
 
-use hexforge_core::{ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError};
+use hexforge_core::{
+    ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
+};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
 use std::borrow::Cow;
@@ -38,20 +40,40 @@ impl Transform for Pbkdf2Hash {
         })
     }
     fn capabilities(&self) -> TransformCapabilities {
-        TransformCapabilities { deterministic: true, streamable: false, memory_cost: MemoryCost::Constant }
+        TransformCapabilities {
+            deterministic: true,
+            streamable: false,
+            memory_cost: MemoryCost::Constant,
+        }
     }
-    fn apply<'a>(&self, _input: ByteView<'a>, params: &serde_json::Value, _ctx: &dyn ExecutionContext) -> Result<ByteView<'a>, TransformError> {
-        let password = params.get("password").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "password".into(),
-            reason: "string parameter 'password' is required".into(),
+    fn apply<'a>(
+        &self,
+        _input: ByteView<'a>,
+        params: &serde_json::Value,
+        _ctx: &dyn ExecutionContext,
+    ) -> Result<ByteView<'a>, TransformError> {
+        let password = params
+            .get("password")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| TransformError::InvalidParameter {
+                field: "password".into(),
+                reason: "string parameter 'password' is required".into(),
+            })?;
+        let salt = params.get("salt").and_then(|v| v.as_str()).ok_or_else(|| {
+            TransformError::InvalidParameter {
+                field: "salt".into(),
+                reason: "string parameter 'salt' is required".into(),
+            }
         })?;
-        let salt = params.get("salt").and_then(|v| v.as_str()).ok_or_else(|| TransformError::InvalidParameter {
-            field: "salt".into(),
-            reason: "string parameter 'salt' is required".into(),
-        })?;
-        let iterations = params.get("iterations").and_then(|v| v.as_u64()).unwrap_or(1000) as u32;
+        let iterations = params
+            .get("iterations")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1000) as u32;
         let length = params.get("length").and_then(|v| v.as_u64()).unwrap_or(32) as usize;
-        let hash = params.get("hash").and_then(|v| v.as_str()).unwrap_or("sha256");
+        let hash = params
+            .get("hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sha256");
         if length == 0 || length > 128 {
             return Err(TransformError::InvalidParameter {
                 field: "length".into(),
@@ -67,15 +89,35 @@ impl Transform for Pbkdf2Hash {
         let mut out = vec![0u8; length];
         match hash {
             "sha1" => {
-                pbkdf2::pbkdf2_hmac::<Sha1>(password.as_bytes(), salt.as_bytes(), iterations, &mut out);
+                pbkdf2::pbkdf2_hmac::<Sha1>(
+                    password.as_bytes(),
+                    salt.as_bytes(),
+                    iterations,
+                    &mut out,
+                );
             }
             "sha256" => {
-                pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt.as_bytes(), iterations, &mut out);
+                pbkdf2::pbkdf2_hmac::<Sha256>(
+                    password.as_bytes(),
+                    salt.as_bytes(),
+                    iterations,
+                    &mut out,
+                );
             }
             "sha512" => {
-                pbkdf2::pbkdf2_hmac::<Sha512>(password.as_bytes(), salt.as_bytes(), iterations, &mut out);
+                pbkdf2::pbkdf2_hmac::<Sha512>(
+                    password.as_bytes(),
+                    salt.as_bytes(),
+                    iterations,
+                    &mut out,
+                );
             }
-            _ => return Err(TransformError::InvalidParameter { field: "hash".into(), reason: "must be sha1|sha256|sha512".into() }),
+            _ => {
+                return Err(TransformError::InvalidParameter {
+                    field: "hash".into(),
+                    reason: "must be sha1|sha256|sha512".into(),
+                })
+            }
         }
         Ok(Cow::Owned(hex::encode(out).into_bytes()))
     }
@@ -99,7 +141,10 @@ mod tests {
         assert_ne!(out1, out2);
         // Known SHA1 vector (RFC6070) to ensure HMAC wiring is correct for SHA1
         let out_sha1 = Pbkdf2Hash.apply(Cow::Borrowed(b""), &serde_json::json!({"password":"password","salt":"salt","iterations":4096,"length":20,"hash":"sha1"}), &ctx).unwrap();
-        assert_eq!(out_sha1.as_ref(), b"4b007901b765489abead49d926f721d065a429c1");
+        assert_eq!(
+            out_sha1.as_ref(),
+            b"4b007901b765489abead49d926f721d065a429c1"
+        );
     }
 
     #[test]
@@ -112,7 +157,13 @@ mod tests {
     #[test]
     fn pbkdf2_missing_params() {
         let ctx = NullExecutionContext;
-        let err = Pbkdf2Hash.apply(Cow::Borrowed(b""), &serde_json::json!({"password":"p"}), &ctx).unwrap_err();
+        let err = Pbkdf2Hash
+            .apply(
+                Cow::Borrowed(b""),
+                &serde_json::json!({"password":"p"}),
+                &ctx,
+            )
+            .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
     }
 }
