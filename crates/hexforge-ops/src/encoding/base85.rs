@@ -128,7 +128,7 @@ fn decode_base85(s: &str) -> Result<Vec<u8>, String> {
     // Real output length = floor(filtered_len *4 /5) ??? For Ascii85, 5 chars ->4 bytes, so bytes = groups*4 - pad_bytes
     // Pad_bytes = (5 - rem) %5 truncated to bytes: if rem==0 =>0, rem==2 =>3 bytes pad? Actually 2 chars ->1 byte, we padded 3 'u's, we produced 4 bytes, but should only keep 1 byte
     // So truncate: if rem==0 => keep all, rem==2 => keep 1 byte of last group, rem==3 =>2 bytes, rem==4 =>3 bytes
-    let groups = (filtered.len() + 4) / 5; // ceil
+    let groups = filtered.len().div_ceil(5);
     let total_bytes = groups * 4;
     let pad_chars = (5 - (filtered.len() % 5)) % 5;
     let truncate = match pad_chars {

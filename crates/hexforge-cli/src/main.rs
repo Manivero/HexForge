@@ -29,8 +29,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Usage: hexforge-cli run <recipe> --in <file> --out <file>
-       hexforge-cli validate <recipe> <recipe.hexforge> --in <input-file> --out <output-file>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> --out <file>\n  hexforge-cli validate <recipe.hexforge>"
             );
             std::process::exit(2);
         }

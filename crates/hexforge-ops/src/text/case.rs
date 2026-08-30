@@ -20,11 +20,6 @@ fn split_words(s: &str) -> Vec<String> {
             }
             cur.push(c.to_ascii_lowercase());
             prev_is_lower = is_lower;
-        } else if c == ' ' || c == '-' || c == '_' || c == '.' {
-            if !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
-            }
-            prev_is_lower = false;
         } else {
             if !cur.is_empty() {
                 words.push(std::mem::take(&mut cur));
