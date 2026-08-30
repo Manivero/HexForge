@@ -254,6 +254,7 @@ Report vulnerabilities privately to the maintainers. Do not open public issues f
 - **XOR brute-force** — `crypto.xor_bruteforce` single-byte (1..255, printable filter) with 3 tests
 - **Hashing streamable** — `hashing.md5/sha1/sha256/sha512/sha3_256/blake2b/s/crc32` now `streamable:true, Constant` with chunked `apply_chunk` for 32GB files (3 new chunked tests)
 - **Case transform extended** — `text.case_transform` now supports `upper/lower/title/snake/kebab/camel/pascal` (4 new tests)
+- **PBKDF2** — `hashing.pbkdf2` PBKDF2-HMAC (sha1/sha256/sha512, RFC6070 vectors) with 3 tests
 - **Mapped sources copy-on-write** — file-backed sources patch via COW to InMemory (FR Hex Editor)
 - **previewOnly downstream warming** — `previewOnly=false` now warms downstream cache concurrently via blocking pool (fork graphs parallel)
 - **No multi-source graphs** — recipes assume exactly one root source node (CLI supports multi-root via same input)
