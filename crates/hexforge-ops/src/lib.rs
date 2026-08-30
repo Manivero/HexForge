@@ -51,13 +51,19 @@ mod tests {
     #[test]
     fn registry_contains_all_builtin_operations() {
         let registry = build_registry();
-        // На момент MVP: base64 encode/decode, hex encode/decode, rot13, md5, sha256.
+        // Реестр должен содержать все встроенные операции (49+ на 2026-08, включая pbkdf2). Порог 50 ловит случайную потерю inventory-сбора.
         assert!(
-            registry.len() >= 6,
-            "expected at least 6 built-in operations, got {}",
+            registry.len() >= 50,
+            "expected at least 50 built-in operations, got {}",
             registry.len()
         );
         assert!(registry.get("encoding.base64.decode").is_some());
         assert!(registry.get("hashing.sha256").is_some());
+        assert!(
+            registry.get("hashing.pbkdf2").is_some(),
+            "pbkdf2 must be registered"
+        );
+        assert!(registry.get("hashing.hmac").is_some());
+        assert!(registry.get("text.case_transform").is_some());
     }
 }
