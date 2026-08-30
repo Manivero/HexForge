@@ -1,3 +1,4 @@
+pub mod argon2;
 pub mod blake3;
 pub mod crc32;
 pub mod hmac;

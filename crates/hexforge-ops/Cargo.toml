@@ -44,5 +44,6 @@ inventory = "0.3"
 hmac = "0.12"
 pbkdf2 = "0.12"
 scrypt = "0.11"
+argon2 = "0.5"
 
 [dev-dependencies]
