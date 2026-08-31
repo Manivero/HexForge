@@ -62,7 +62,7 @@ hexforge/
 | Компонент | Статус | Верификация |
 |---|---|---|
 | `hexforge-core` (Transform, Graph, History, Registry) | ✅ | `cargo test -p hexforge-core` — 9 тестов (topo sort O(V+E), cycle, fork/merge, lineage + parent-cycle guard, order) |
-| `hexforge-ops` — 50+ операции | ✅ | `cargo test -p hexforge-ops` — 230 тестов (см. ниже); `clippy -D warnings` 0 |
+| `hexforge-ops` — 50+ операции | ✅ | `cargo test -p hexforge-ops` — 234 теста (см. ниже); `clippy -D warnings` 0 |
 | Encoding | ✅ | base32 RFC4648 **streamable** (PerChunk, 5→8, 2 new chunked tests), base58 Bitcoin, base64 std/url_safe/custom (64-char) **streamable** (PerChunk), base85 Ascii85 (4→5, `z`, 5 tests), hex (streamable), quoted_printable RFC2045, json pretty/minify, xml pretty (quick-xml), msgpack (rmp-serde), protobuf raw walk — roundtrip + invalid input |
 | Hashing | ✅ | blake3 **streamable**, blake2b/s **streamable**, crc32 **streamable** (Constant, 1 new chunked test), md5/sha1/sha256/sha512/sha3_256 **streamable** (Constant, 2 new chunked tests), ssdeep, hmac (5 tests), pbkdf2 (sha1/sha256/sha512, 4 tests + DoS cap 1M, RFC6070), scrypt (RFC 7914, 4 tests, log_n/r/p caps), argon2 (argon2id/i/d, RFC 9106, 5 tests, m/t/p caps) — known vectors |
 | Compression | ✅ | gzip/zlib/deflate (flate2), bzip2 (bzip2), lzma/xz (xz2) — roundtrip + level param, large 50k |
@@ -71,7 +71,7 @@ hexforge/
 | Crypto | ✅ | rot_n, xor (UTF-8 key) + xor_bruteforce (single-byte, printable filter, 3 tests), rc4 (hexKey), aes-128/192/256 ecb/cbc (PKCS7) + ctr (no padding, ctr 0.9), aes-gcm 128/256, chacha20 (RFC8439) + poly1305 AEAD — NIST vectors, involution |
 | Streaming | ✅ | concat (MergeTransform), diff (2-input byte diff) |
 | Binary Analysis | ✅ | strings_extract (ASCII/UTF-16LE/BE), entropy, elf_info/pe_info/macho_info (goblin), magic (infer) — reject non-elf/pe, PNG mime |
-| Auto/Magic Wand | ✅ | encoding.auto_decode (base64/hex heuristic) |
+| Auto/Magic Wand | ✅ | encoding.auto_decode (base64/hex/base32/base58/base85/url + chained up to 5, roundtrip checks, 7 tests) |
 | React + TS strict | ✅ | `tsc --noEmit` 0, `vite build` 255kB gzip 81kB, `eslint --max-warnings 0` 0 |
 | i18n en/ru | ✅ | `src/lib/i18n.ts` 11 ключей, `useAppStore.locale` + toggle в `App.tsx:34`, `t(locale,key)` |
 | Tauri IPC (15 команд) | ✅ | `cargo test -p hexforge` 22 golden-теста (wire format, sort_for_palette, graphDto, export/import, cancel, progress, invalidated) |
@@ -129,7 +129,7 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 323 зелёных (Rust: core 9, ops 230, stream 7, engine 35, tauri 22, cli 6, plugin-host 14) + 45 FE (fuzz, bytes, graph, graphWalk findRootIds/depthOf, graphMutate N-ary, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 257kB, `npm run test:fe` 45.
+Все изменения перепроверены: `cargo test --workspace` — 327 зелёных (Rust: core 9, ops 234, stream 7, engine 35, tauri 22, cli 6, plugin-host 14) + 45 FE (fuzz, bytes, graph, graphWalk findRootIds/depthOf, graphMutate N-ary, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 257kB, `npm run test:fe` 45.
 1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
 2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
 3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.
