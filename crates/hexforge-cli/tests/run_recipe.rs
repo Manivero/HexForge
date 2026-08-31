@@ -59,7 +59,7 @@ fn run_recipe_rot13_then_base64_end_to_end() {
 
     let summary = hexforge_cli::run_recipe(
         recipe.to_str().unwrap(),
-        input.to_str().unwrap(),
+        &[input.to_str().unwrap().to_string()],
         out.to_str().unwrap(),
     )
     .expect("recipe must run");
@@ -78,7 +78,7 @@ fn run_recipe_rejects_invalid_json() {
     let recipe = write(&dir, "bad.json", b"{ nope");
     let err = hexforge_cli::run_recipe(
         recipe.to_str().unwrap(),
-        recipe.to_str().unwrap(),
+        &[recipe.to_str().unwrap().to_string()],
         dir.join("o.bin").to_str().unwrap(),
     )
     .unwrap_err();
@@ -102,7 +102,7 @@ fn run_recipe_rejects_missing_operation() {
     let recipe = write(&dir, "r.json", recipe_json(nodes).as_bytes());
     let err = hexforge_cli::run_recipe(
         recipe.to_str().unwrap(),
-        recipe.to_str().unwrap(),
+        &[recipe.to_str().unwrap().to_string()],
         dir.join("o.bin").to_str().unwrap(),
     )
     .unwrap_err();
@@ -131,9 +131,118 @@ fn run_recipe_requires_single_output_node() {
     let recipe = write(&dir, "two-sinks.json", recipe_json(nodes).as_bytes());
     let err = hexforge_cli::run_recipe(
         recipe.to_str().unwrap(),
-        recipe.to_str().unwrap(),
+        &[recipe.to_str().unwrap().to_string()],
         dir.join("o.bin").to_str().unwrap(),
     )
     .unwrap_err();
     assert!(err.contains("exactly one output node"));
+}
+
+#[test]
+fn run_recipe_multi_source_concat() {
+    use hexforge_engine::graph_dto::OperationNodeDto;
+    let dir = temp_dir();
+    // Fixed UUIDs to ensure deterministic sorted order: a < b lexicographically
+    let a = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let b = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    let c = NodeId::new_v4();
+    let nodes = json!({
+        a.to_string(): OperationNodeDto {
+            id: a.to_string(),
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({ "sourceHandle": "00000000-0000-4000-8000-000000000000" }),
+            inputs: vec![],
+        },
+        b.to_string(): OperationNodeDto {
+            id: b.to_string(),
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({ "sourceHandle": "00000000-0000-4000-8000-000000000001" }),
+            inputs: vec![],
+        },
+        c.to_string(): OperationNodeDto {
+            id: c.to_string(),
+            operation_id: "streaming.concat".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({}),
+            inputs: vec![a.to_string(), b.to_string()],
+        }
+    });
+    let recipe = write(&dir, "concat.json", recipe_json(nodes).as_bytes());
+    let in1 = write(&dir, "in1.bin", b"Hello");
+    let in2 = write(&dir, "in2.bin", b"World");
+    let out = dir.join("out.bin");
+    let summary = hexforge_cli::run_recipe(
+        recipe.to_str().unwrap(),
+        &[
+            in1.to_str().unwrap().to_string(),
+            in2.to_str().unwrap().to_string(),
+        ],
+        out.to_str().unwrap(),
+    )
+    .expect("multi-source concat must run");
+    // Hello -> Uryyb, World -> Jbeyq, concat -> UryybJbeyq (rot13 of each)
+    let written = std::fs::read(&out).unwrap();
+    assert_eq!(written, b"UryybJbeyq");
+    assert_eq!(summary.executed_nodes, 3);
+}
+
+#[test]
+fn run_recipe_multi_source_mismatched_in_count_rejected() {
+    use hexforge_engine::graph_dto::OperationNodeDto;
+    let dir = temp_dir();
+    let a = NodeId::new_v4();
+    let b = NodeId::new_v4();
+    let c = NodeId::new_v4();
+    let nodes = json!({
+        a.to_string(): OperationNodeDto {
+            id: a.to_string(),
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({}),
+            inputs: vec![],
+        },
+        b.to_string(): OperationNodeDto {
+            id: b.to_string(),
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({}),
+            inputs: vec![],
+        },
+        c.to_string(): OperationNodeDto {
+            id: c.to_string(),
+            operation_id: "streaming.concat".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({}),
+            inputs: vec![a.to_string(), b.to_string()],
+        }
+    });
+    let recipe = write(&dir, "r.json", recipe_json(nodes).as_bytes());
+    let in1 = write(&dir, "in1.bin", b"a");
+    let out = dir.join("o.bin");
+    // 1 input for 2 roots should broadcast and succeed (backward compat)
+    let ok = hexforge_cli::run_recipe(
+        recipe.to_str().unwrap(),
+        &[in1.to_str().unwrap().to_string()],
+        out.to_str().unwrap(),
+    );
+    assert!(
+        ok.is_ok(),
+        "1 input for 2 roots should broadcast and succeed, got err: {:?}",
+        ok.err()
+    );
+    let in2 = write(&dir, "in2.bin", b"b");
+    let in3 = write(&dir, "in3.bin", b"c");
+    let err2 = hexforge_cli::run_recipe(
+        recipe.to_str().unwrap(),
+        &[
+            in1.to_str().unwrap().to_string(),
+            in2.to_str().unwrap().to_string(),
+            in3.to_str().unwrap().to_string(),
+        ],
+        dir.join("o2.bin").to_str().unwrap(),
+    )
+    .unwrap_err();
+    assert!(err2.contains("must be 1 or match number of source nodes"));
 }

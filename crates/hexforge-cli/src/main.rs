@@ -11,10 +11,44 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        [cmd, recipe, flag_in, input, flag_out, output]
-            if cmd == "run" && flag_in == "--in" && flag_out == "--out" =>
-        {
-            match hexforge_cli::run_recipe(recipe, input, output) {
+        [cmd, recipe, rest @ ..] if cmd == "run" => {
+            // Parse `--in <file>` (repeatable) + `--out <file>`
+            let mut in_files: Vec<String> = Vec::new();
+            let mut out_file: Option<String> = None;
+            let mut i = 0;
+            while i < rest.len() {
+                match rest[i].as_str() {
+                    "--in" => {
+                        if i + 1 >= rest.len() {
+                            eprintln!("error: --in requires a file argument");
+                            std::process::exit(2);
+                        }
+                        in_files.push(rest[i + 1].clone());
+                        i += 2;
+                    }
+                    "--out" => {
+                        if i + 1 >= rest.len() {
+                            eprintln!("error: --out requires a file argument");
+                            std::process::exit(2);
+                        }
+                        out_file = Some(rest[i + 1].clone());
+                        i += 2;
+                    }
+                    other => {
+                        eprintln!("error: unknown argument '{other}'");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            let Some(out) = out_file else {
+                eprintln!("error: --out <file> is required");
+                std::process::exit(2);
+            };
+            if in_files.is_empty() {
+                eprintln!("error: at least one --in <file> is required");
+                std::process::exit(2);
+            }
+            match hexforge_cli::run_recipe(recipe, &in_files, &out) {
                 Ok(summary) => {
                     println!(
                         "OK: {} node(s), {} bytes written in {} ms",
@@ -29,7 +63,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> --out <file>\n  hexforge-cli validate <recipe.hexforge>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>"
             );
             std::process::exit(2);
         }

@@ -36,10 +36,19 @@ fn validate_cli_path(path: &str, field: &str) -> Result<(), String> {
 }
 
 /// Ошибки CLI: человекочитаемая строка уходит в stderr / тестовый assert.
-pub fn run_recipe(recipe_path: &str, in_path: &str, out_path: &str) -> Result<RunSummary, String> {
+pub fn run_recipe(
+    recipe_path: &str,
+    in_paths: &[String],
+    out_path: &str,
+) -> Result<RunSummary, String> {
     validate_cli_path(recipe_path, "recipe")?;
-    validate_cli_path(in_path, "input")?;
+    for p in in_paths {
+        validate_cli_path(p, "input")?;
+    }
     validate_cli_path(out_path, "output")?;
+    if in_paths.is_empty() {
+        return Err("at least one --in <file> is required".into());
+    }
     let started = std::time::Instant::now();
 
     // 1. Рецепт: JSON формата GraphDto (контракт 05-IPC).
@@ -60,9 +69,8 @@ pub fn run_recipe(recipe_path: &str, in_path: &str, out_path: &str) -> Result<Ru
         }
     }
 
-    // 3. Корни: узлы без входов. Все получают один и тот же --in источник
-    //    (MVP-семантика: мультиисточниковые рецепты пока не поддержаны).
-    let roots: Vec<NodeId> = graph
+    // 3. Корни: узлы без входов. Поддержка N источников (multi-source).
+    let mut roots: Vec<NodeId> = graph
         .nodes
         .values()
         .filter(|n| n.inputs.is_empty())
@@ -71,44 +79,68 @@ pub fn run_recipe(recipe_path: &str, in_path: &str, out_path: &str) -> Result<Ru
     if roots.is_empty() {
         return Err("recipe has no source nodes (nodes without inputs)".into());
     }
+    // Детерминированный порядок корней — сортировка по UUID-строке, чтобы
+    // `--in file1 --in file2` маппилось стабильно независимо от HashMap-порядка.
+    roots.sort_by_key(|a| a.to_string());
 
-    // NFR-2: для файлов >16MiB используем mmap вместо полной загрузки в RAM (constant memory)
-    // Для маленьких файлов оставляем InMemory (быстрее, проще). Fallback на read если mmap не удался
-    // (например, пустой файл на Windows или pipe).
-    let input_handle = {
-        let file = std::fs::File::open(in_path)
-            .map_err(|e| format!("cannot open input '{in_path}': {e}"))?;
-        let meta = file
-            .metadata()
-            .map_err(|e| format!("cannot stat input '{in_path}': {e}"))?;
-        if meta.len() > 16 * 1024 * 1024 {
-            match unsafe { memmap2::Mmap::map(&file) } {
-                Ok(mmap) => {
-                    let mut sources = state.sources.write();
-                    sources.insert(SourceEntry::Mapped(mmap))
-                }
-                Err(_) => {
-                    let bytes = std::fs::read(in_path)
-                        .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
-                    let mut sources = state.sources.write();
-                    sources.insert(SourceEntry::InMemory(bytes))
-                }
-            }
-        } else if meta.len() == 0 {
-            let mut sources = state.sources.write();
-            sources.insert(SourceEntry::InMemory(Vec::new()))
+    // Проверка соответствия числа --in и числа корней
+    if in_paths.len() != 1 && in_paths.len() != roots.len() {
+        return Err(format!(
+            "number of --in files ({}) must be 1 or match number of source nodes ({})",
+            in_paths.len(),
+            roots.len()
+        ));
+    }
+
+    // Создаём SourceEntry для каждого --in (mmap >16MiB, иначе InMemory)
+    let handles: Vec<uuid::Uuid> = {
+        let mut hs = Vec::with_capacity(if in_paths.len() == 1 { 1 } else { roots.len() });
+        let paths_to_create: Vec<&String> = if in_paths.len() == 1 {
+            vec![&in_paths[0]]
         } else {
-            let bytes = std::fs::read(in_path)
-                .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
-            let mut sources = state.sources.write();
-            sources.insert(SourceEntry::InMemory(bytes))
+            in_paths.iter().collect()
+        };
+        for in_path in paths_to_create {
+            let file = std::fs::File::open(in_path)
+                .map_err(|e| format!("cannot open input '{in_path}': {e}"))?;
+            let meta = file
+                .metadata()
+                .map_err(|e| format!("cannot stat input '{in_path}': {e}"))?;
+            let handle = if meta.len() > 16 * 1024 * 1024 {
+                match unsafe { memmap2::Mmap::map(&file) } {
+                    Ok(mmap) => {
+                        let mut sources = state.sources.write();
+                        sources.insert(SourceEntry::Mapped(mmap))
+                    }
+                    Err(_) => {
+                        let bytes = std::fs::read(in_path)
+                            .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
+                        let mut sources = state.sources.write();
+                        sources.insert(SourceEntry::InMemory(bytes))
+                    }
+                }
+            } else if meta.len() == 0 {
+                let mut sources = state.sources.write();
+                sources.insert(SourceEntry::InMemory(Vec::new()))
+            } else {
+                let bytes = std::fs::read(in_path)
+                    .map_err(|e| format!("cannot read input '{in_path}': {e}"))?;
+                let mut sources = state.sources.write();
+                sources.insert(SourceEntry::InMemory(bytes))
+            };
+            hs.push(handle);
         }
+        hs
     };
+
+    // Привязываем handles к корням: 1 handle → все корни, N handles → N корней по порядку
     {
-        let handle = input_handle;
-        for root_id in &roots {
-            // ВАЖНО: read-guard ограничен блоком; if let со скрутини-временем
-            // протянул бы его через graph.write() ниже → дедлок на том же треде.
+        for (idx, root_id) in roots.iter().enumerate() {
+            let handle = if handles.len() == 1 {
+                handles[0]
+            } else {
+                handles[idx]
+            };
             let existing = { state.graph.read().nodes.get(root_id).cloned() };
             if let Some(mut node) = existing {
                 node.params = json!({ "sourceHandle": handle.to_string() });
