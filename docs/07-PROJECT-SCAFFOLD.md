@@ -75,7 +75,7 @@ hexforge/
 | Import | ✅ | `import_recipe` + `import_cyberchef_recipe` (28+ mappings: Base64/Hex/Base32/ROT13/Reverse/URL/Gzip/Zlib/Bzip2/LZMA/XOR/MD5/SHA1/SHA2/SHA3/BLAKE2b/s/BLAKE3/CRC32/SSDEEP/Entropy/Strings/Magic, unmapped list) |
 | .env.example + .gitignore | ✅ | `*.out` + `!.env.example`, `.env` ignored, `src-tauri/gen` ignored, secrets scan 0 |
 | Chunk 64 MiB (FR-5.2) | ✅ | `hexforge-stream:23` 64 MiB, parallel threshold = 64 MiB, engine tests with 64M vectors (24s) |
-| Plugin host | ✅ | `hexforge-plugin-host` Ed25519 verify + Wasmtime fuel metering (NFR-9, 10M, 2MiB stack) + capability sandbox, 10 tests (signature bypass fix, fuel exhaustion, trap isolation) |
+| Plugin host | ✅ | `hexforge-plugin-host` Ed25519 verify + Wasmtime fuel metering (NFR-9, 10M, 2MiB stack, 256 MiB memory cap via ResourceLimiter) + capability sandbox (check at install & execute) + WIT `transform` Component Model (`wit/plugin.wit`) + core module fallback (`memory`/`transform`) + `PluginTransform` → `Transform` + 14 tests (signature, fuel, trap, uppercase/reverse, memory limiter, capabilities) + `plugins/example-uppercase` + `plugins/README.md` |
 
 ## Как запустить локально
 
@@ -116,7 +116,7 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 316 зелёных (Rust: core 9, ops 230, stream 7, engine 34, tauri 22, cli 4, plugin-host 10) + 42 FE (fuzz, bytes, graph, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 255kB, `npm run test:fe` 42.
+Все изменения перепроверены: `cargo test --workspace` — 320 зелёных (Rust: core 9, ops 230, stream 7, engine 34, tauri 22, cli 4, plugin-host 14) + 42 FE (fuzz, bytes, graph, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 255kB, `npm run test:fe` 42.
 1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
 2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
 3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.
