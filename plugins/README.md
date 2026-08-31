@@ -42,6 +42,11 @@ See `crates/hexforge-plugin-host/src/lib.rs` (`verify_signature`, `PluginRuntime
 ```wit
 package hexforge:plugin@0.1.0;
 interface transform {
+    record capabilities {
+        deterministic: bool,
+        streamable: bool,
+        memory-cost: string, // "constant" | "per-chunk" | "full-buffer"
+    }
     get-id: func() -> string;
     get-version: func() -> string;
     get-display-name: func() -> string;
