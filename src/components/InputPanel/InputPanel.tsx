@@ -13,6 +13,7 @@ export function InputPanel() {
   const sourceSizeBytes = useAppStore((s) => s.sourceSizeBytes);
   const creatingSource = useAppStore((s) => s.creatingSource);
   const createSource = useAppStore((s) => s.createSource);
+  const createNewSourceNode = useAppStore((s) => s.createNewSourceNode);
 
   const disabled = creatingSource || text.length === 0;
 
@@ -39,18 +40,37 @@ export function InputPanel() {
           "placeholder:text-text-muted focus:border-border-focus",
         ].join(" ")}
       />
-      <button
-        onClick={() => void createSource(text)}
-        disabled={disabled}
-        className={[
-          "mt-2 rounded-md border border-border-default bg-surface-2 px-3 py-1.5 text-xs",
-          "text-text-primary transition-colors duration-fast ease-out-expo",
-          "enabled:hover:border-border-focus enabled:hover:text-accent",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-        ].join(" ")}
-      >
-        {creatingSource ? "Creating…" : "Create literal source"}
-      </button>
+      <div className="mt-2 flex gap-2">
+        <button
+          onClick={() => void createSource(text)}
+          disabled={disabled}
+          title="Создаёт источник и привязывает к корню выбранной ветки (single-source compat)"
+          className={[
+            "rounded-md border border-border-default bg-surface-2 px-3 py-1.5 text-xs",
+            "text-text-primary transition-colors duration-fast ease-out-expo",
+            "enabled:hover:border-border-focus enabled:hover:text-accent",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+          ].join(" ")}
+        >
+          {creatingSource ? "Creating…" : "Create literal source"}
+        </button>
+        <button
+          onClick={() => void createNewSourceNode(text)}
+          disabled={disabled}
+          title="Создаёт новый source-узел с собственным handle (multi-source, FR-1.2)"
+          className={[
+            "rounded-md border border-accent bg-surface-1 px-3 py-1.5 text-xs",
+            "text-accent transition-colors duration-fast ease-out-expo",
+            "enabled:hover:bg-accent enabled:hover:text-white",
+            "disabled:cursor-not-allowed disabled:opacity-50",
+          ].join(" ")}
+        >
+          New source node
+        </button>
+      </div>
+      <p className="mt-2 text-2xs text-text-muted">
+        Multi-source: создайте несколько source-узлов, затем соедините их через `streaming.concat` / `streaming.diff` / `crypto.xor`.
+      </p>
     </section>
   );
 }

@@ -21,7 +21,7 @@ export function removeNode(nodes: Record<string, OperationNodeDto>, id: NodeId):
   const target = nodes[id];
   if (!target) return { nodes, removed: false };
 
-  const bridgeId: string | undefined = target.inputs[0];
+  const bridgeIds: string[] = [...target.inputs];
 
   const next: Record<string, OperationNodeDto> = {};
   for (const [nid, node] of Object.entries(nodes)) {
@@ -33,11 +33,13 @@ export function removeNode(nodes: Record<string, OperationNodeDto>, id: NodeId):
       continue;
     }
 
-    // Ребёнок удаляемого: убираем ссылку и, если есть мост, вставляем его
-    // первой ссылкой (дедуп через Set; самоссылку не создаём).
+    // Ребёнок удаляемого: убираем ссылку и, если есть мост (N-ary), вставляем все
+    // родителей удаляемого (дедуп, самоссылку не создаём) — FR-1.4.
     const rebuilt: string[] = [];
-    if (bridgeId !== undefined && bridgeId !== nid) {
-      rebuilt.push(bridgeId);
+    for (const bid of bridgeIds) {
+      if (bid !== nid && !rebuilt.includes(bid)) {
+        rebuilt.push(bid);
+      }
     }
     for (const inp of node.inputs) {
       if (inp !== id && !rebuilt.includes(inp)) {

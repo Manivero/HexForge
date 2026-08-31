@@ -94,3 +94,29 @@ test("layoutOrder: пустой граф — пустой список", () => {
   assert.deepEqual(layoutOrder({}), []);
 });
 
+test("findRootIds: merge-узел с двумя корнями возвращает оба", async () => {
+  const { findRootIds } = await import("../.fe-build/graphWalk.js");
+  const nodes = {
+    a: { id: "a", inputs: [] },
+    b: { id: "b", inputs: [] },
+    c: { id: "c", inputs: ["a", "b"] },
+  };
+  const roots = findRootIds(nodes, "c");
+  assert.deepEqual(new Set(roots), new Set(["a", "b"]));
+});
+
+test("depthOf: merge-узел глубина = max(глубин входов)+1", async () => {
+  const { layoutOrder: lo } = await import("../.fe-build/graphWalk.js");
+  const nodes = {
+    a: mkN("a", []),
+    b: mkN("b", []),
+    c: mkN("c", ["a", "b"]),
+    d: mkN("d", ["c"]),
+  };
+  const items = lo(nodes);
+  const d = items.find((n) => n.id === "d");
+  const c = items.find((n) => n.id === "c");
+  assert.equal(c.depth, 1);
+  assert.equal(d.depth, 2);
+});
+

@@ -87,6 +87,8 @@ interface DataSlice {
   sourceSizeBytes: number | null;
   creatingSource: boolean;
   createSource: (text: string) => Promise<boolean>;
+  /** Создаёт новый source-узел с собственным handle (multi-source, FR-1.2). */
+  createNewSourceNode: (text: string) => Promise<boolean>;
 
   /** Монотонный счётчик мутаций графа (узлы/параметры) — базис
    * stale-инвалидации результата превью (видимая часть FR-1.6). */
@@ -314,6 +316,40 @@ export const useAppStore = create<AppStore>((set, get) => ({
         hexBytes: null,
       });
       get().assignSourceToRoot();
+      return true;
+    } catch (err) {
+      set({ creatingSource: false, runError: formatIpcError(err) });
+      return false;
+    }
+  },
+  createNewSourceNode: async (text) => {
+    set({ creatingSource: true, runError: null });
+    try {
+      const resp = await createLiteralSource({ utf8: text });
+      const id = newNodeId();
+      const node: OperationNodeDto = {
+        id,
+        operationId: "text.rot13",
+        operationVersion: "1.0.0",
+        params: { sourceHandle: resp.handle },
+        inputs: [],
+      };
+      set((s) => ({
+        nodes: { ...s.nodes, [id]: node },
+        selectedNodeId: id,
+        sourceHandle: resp.handle,
+        sourceSizeBytes: resp.sizeBytes,
+        graphVersion: s.graphVersion + 1,
+        creatingSource: false,
+        lastRun: null,
+        ranAtGraphVersion: null,
+        previewText: null,
+        previewHex: null,
+        previewTruncated: false,
+        hexOffset: null,
+        hexBytes: null,
+      }));
+      scheduleBackendSync(get());
       return true;
     } catch (err) {
       set({ creatingSource: false, runError: formatIpcError(err) });

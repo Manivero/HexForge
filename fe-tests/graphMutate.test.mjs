@@ -48,3 +48,16 @@ test("неизвестный id: removed=false, объект тот же (без
   assert.equal(res.removed, false);
   assert.equal(res.nodes, nodes);
 });
+
+test("удаление merge-узла мостит всех родителей (N-ary, FR-1.4)", () => {
+  const nodes = {
+    a: mk("a", []),
+    b: mk("b", []),
+    m: mk("m", ["a", "b"]),
+    d: mk("d", ["m"]),
+  };
+  const res = removeNode(nodes, "m");
+  // Ребёнок d имел [m], m имел [a,b] → после удаления d должен иметь [a,b] (оба родителя)
+  assert.deepEqual(new Set(res.nodes.d.inputs), new Set(["a", "b"]));
+  assert.equal(res.nodes.m, undefined);
+});
