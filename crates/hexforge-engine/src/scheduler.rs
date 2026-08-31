@@ -137,13 +137,22 @@ fn resolve_node(
         }
     };
 
-    // Memoization: хэш первичного буфера входа считается один раз и идёт
-    // и в ключ кэша, и в snapshot истории.
-    let primary_input_hash = blake3::hash(&inputs[0]);
+    // Memoization: хэш входа считается один раз и идёт и в ключ кэша, и в snapshot истории.
+    // Для merge-узлов (N>1) ключ — комбинированный хэш всех входов (конкатенация их blake3),
+    // чтобы разные вторые входы не давали коллизию по первому (FR-1.4).
+    let combined_input_hash = if inputs.len() == 1 {
+        blake3::hash(&inputs[0])
+    } else {
+        let mut hasher = blake3::Hasher::new();
+        for inp in &inputs {
+            hasher.update(blake3::hash(inp).as_bytes());
+        }
+        hasher.finalize()
+    };
     let cache_key = hexforge_core::reproducibility_key(
         &node.operation_id,
         &node.operation_version,
-        &primary_input_hash.to_hex()[..],
+        &combined_input_hash.to_hex()[..],
         &node.params,
     );
 
@@ -153,7 +162,7 @@ fn resolve_node(
         // нулевыми узлами и смещал голову при прыжках.
         // История — граф состояний: повтор идентичного запуска переиспользует
         // существующий снапшот (head остаётся), не создавая дубль.
-        record_output(&node, state, primary_input_hash, blake3::hash(&cached));
+        record_output(&node, state, combined_input_hash, blake3::hash(&cached));
         emit_progress(on_progress, node_id, cached.len());
         return Ok(cached);
     }
@@ -166,7 +175,7 @@ fn resolve_node(
 
     state.cache.lock().put(cache_key, Arc::clone(&output));
     emit_progress(on_progress, node_id, output.len());
-    record_output(&node, state, primary_input_hash, blake3::hash(&output));
+    record_output(&node, state, combined_input_hash, blake3::hash(&output));
 
     Ok(output)
 }
@@ -831,6 +840,18 @@ pub fn replay_snapshot(
             params: step.params.clone(),
             inputs: vec![],
         };
+        // Multi-source merge replay not yet fully supported in this MVP (requires N parent hashes).
+        // Execution via `resolve_node` is multi-source ready; time-travel for merge remains single-source linear.
+        {
+            let graph = state.graph.read();
+            if let Some(g_node) = graph.nodes.get(&step.node_id) {
+                if g_node.inputs.len() > 1 {
+                    return Err(HexForgeError::invalid_input(
+                        "replay for multi-source merge nodes not yet supported in this MVP (use run_node for execution)",
+                    ));
+                }
+            }
+        }
         let transform = lookup_transform(&node, state)?;
 
         // Вход шага — выход предыдущего; для первого шага это корневой
@@ -1249,6 +1270,82 @@ mod tests {
         let err = execute_chain(&state, &bad, &token(), &no_progress).unwrap_err();
         assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
         assert!(err.message.contains("does not support 2 inputs"));
+    }
+
+    #[test]
+    fn cache_distinguishes_merge_second_input() {
+        // Два concat с одинаковым первым входом, но разным вторым — должны быть разные кэш-ключи (combined hash).
+        let state = AppState::new(hexforge_ops::build_registry());
+        let ha = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"AAA".to_vec()));
+        let hb1 = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"BBB".to_vec()));
+        let hb2 = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"CCC".to_vec()));
+
+        let na = NodeId::new_v4();
+        let nb1 = NodeId::new_v4();
+        let nb2 = NodeId::new_v4();
+        let nc1 = NodeId::new_v4();
+        let nc2 = NodeId::new_v4();
+
+        state.graph.write().insert_node(OperationNode {
+            id: na,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": ha.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nb1,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": hb1.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nb2,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": hb2.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nc1,
+            operation_id: "streaming.concat".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![na, nb1],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nc2,
+            operation_id: "streaming.concat".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![na, nb2],
+        });
+
+        let out1 = execute_chain(&state, &nc1, &token(), &no_progress).unwrap();
+        let out2 = execute_chain(&state, &nc2, &token(), &no_progress).unwrap();
+        assert_ne!(
+            out1, out2,
+            "different second input must give different concat output"
+        );
+        // Кэш должен различать второй вход — два промаха, 0 хитов (первый прогон каждого)
+        {
+            let cache = state.cache.lock();
+            assert!(cache.misses >= 2);
+        }
+        // Повторный прогон nc1 должен быть хитом (как минимум 1 hit для nc1, плюс хиты для na/nb1)
+        let out1_again = execute_chain(&state, &nc1, &token(), &no_progress).unwrap();
+        assert_eq!(out1, out1_again);
+        assert!(state.cache.lock().hits >= 1);
     }
 
     #[test]
