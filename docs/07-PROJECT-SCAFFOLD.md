@@ -23,12 +23,24 @@ hexforge/
 │   ├── 06-DESIGN-SYSTEM.md
 │   └── 07-PROJECT-SCAFFOLD.md          # этот файл
 ├── crates/
-│   ├── hexforge-core/                  # ✅ компилируется, 6/6 тестов зелёные
+│   ├── hexforge-core/                  # ✅ компилируется, 9 тестов
 │   │   ├── Cargo.toml
 │   │   └── src/{lib,transform,graph,history,registry}.rs
-│   └── hexforge-ops/                   # ✅ компилируется, 7/7 тестов зелёные
-│       ├── Cargo.toml
-│       └── src/{lib,encoding/{mod,base64,hex},hashing/mod,text/{mod,rot13}}.rs
+│   ├── hexforge-ops/                   # ✅ 230 тестов, 50+ операций
+│   │   ├── Cargo.toml
+│   │   └── src/{lib,encoding/*,hashing/*,crypto/*,text/*,network/*,streaming/*,binary.rs,compression.rs}
+│   ├── hexforge-plugin-host/           # ✅ 14 тестов, WIT `wit/plugin.wit`
+│   │   ├── Cargo.toml
+│   │   ├── wit/plugin.wit
+│   │   └── src/lib.rs (PluginRuntime, PluginTransform, ResourceLimiter)
+│   ├── hexforge-stream/                # ✅ 7 тестов, 64 MiB chunks, bench
+│   │   └── src/lib.rs
+│   └── hexforge-engine/                # ✅ 34 теста, scheduler, cache, history
+│       └── src/{lib,scheduler,state,graph_dto,error}.rs
+├── plugins/                            # ✅ WASM plugins, example-uppercase
+│   ├── README.md
+│   └── example-uppercase/{manifest.json, plugin.wat, plugin.wasm}
+├── assets/                             # ✅ hero.svg, architecture.svg, pipeline.svg (README)
 ├── src-tauri/                          # Tauri v2 shell
 │   ├── Cargo.toml
 │   ├── build.rs
