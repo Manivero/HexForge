@@ -75,9 +75,10 @@ hexforge/
 | React + TS strict | ✅ | `tsc --noEmit` 0, `vite build` 255kB gzip 81kB, `eslint --max-warnings 0` 0 |
 | i18n en/ru | ✅ | `src/lib/i18n.ts` 11 ключей, `useAppStore.locale` + toggle в `App.tsx:34`, `t(locale,key)` |
 | Tauri IPC (15 команд) | ✅ | `cargo test -p hexforge` 22 golden-теста (wire format, sort_for_palette, graphDto, export/import, cancel, progress, invalidated) |
-| Command Palette (⌘K) | ✅ | `vite build` + `fuzzyMatch.ts` 42 FE-тестов |
-| Time-Travel | ✅ | `run_node` пишет Snapshot per node, `list_snapshots` ordered, `jump_to_snapshot` replay+fork, `diff_snapshots` FR-4.3 unified diff |
-| Graph | ✅ | `removeNode` bridge + `clearGraph`, `compute_invalidated` downstream, `graphWalk` BFS + cycle guard — FE tests 42 |
+| Command Palette (⌘K) | ✅ | `vite build` + `fuzzyMatch.ts` 45 FE-тестов (graphWalk findRootIds/depthOf, graphMutate N-ary) |
+| Time-Travel | ✅ | `run_node` пишет Snapshot per node, `list_snapshots` ordered, `jump_to_snapshot` replay+fork, `diff_snapshots` FR-4.3 unified diff (multi-source merge replay — not yet) |
+| Graph | ✅ | `removeNode` N-ary bridge (all parents) + `clearGraph`, `compute_invalidated` downstream, `graphWalk` BFS + cycle guard + `findRootIds`/`depthOf` (max depth) — FE tests 45 |
+| Multi-source | ✅ | N source nodes (DAG, `sourceHandle` per root), `scheduler` combined input hash (N-ary cache), `CLI` `--in` repeatable (1 or N) + sorted roots, `InputPanel` `New source node`, `useAppStore.createNewSourceNode` — 1+4 tests |
 | PreviewDock | ✅ | HexViewer 4KB pages, patch_source COW (Mapped → InMemory), `preview_bytes` base64Chunk |
 | Data-flow UI | ✅ | InputPanel → create_literal_source (16MB limit) → debounced set_graph → run_node → preview_bytes → PreviewDock |
 | GraphCanvas | ✅ | BFS layout, selection, sourceHandle marker, stale badge |
@@ -128,7 +129,7 @@ npm run tauri dev
 - Устранена двойная точка входа трейта `Digest` (через `sha2`- и
   `md5`-реэкспорты) — добавлена прямая зависимость на `digest`.
 
-Все изменения перепроверены: `cargo test --workspace` — 320 зелёных (Rust: core 9, ops 230, stream 7, engine 34, tauri 22, cli 4, plugin-host 14) + 42 FE (fuzz, bytes, graph, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 255kB, `npm run test:fe` 42.
+Все изменения перепроверены: `cargo test --workspace` — 323 зелёных (Rust: core 9, ops 230, stream 7, engine 35, tauri 22, cli 6, plugin-host 14) + 45 FE (fuzz, bytes, graph, graphWalk findRootIds/depthOf, graphMutate N-ary, i18n, ipc) — `cargo clippy -D warnings` 0, `tsc --noEmit` 0, `eslint` 0, `vite build` 257kB, `npm run test:fe` 45.
 1. Планировщик (hexforge-engine): chunked `apply_chunk` + FUSION + параллельный конвейер (stages×4×64MiB=256MiB, FR-5.2), true LRU 256MB, `reproducibility_key`, `cancel_node` Cancelled, `MergeTransform` (concat/diff), `diff_snapshots` FR-4.3 unified diff, `import_cyberchef_recipe` mapping 14 ops, i18n en/ru.
 2. Time-Travel: `jump_to_snapshot` replay + fork DAG + `diff_snapshots` byte/line diff; HistoryPanel DFS, `previewOnly` warming downstream; `compute_invalidated` downstream.
 3. Иконки (`src-tauri/icons/*`) via `npx tauri icon`; смена брендинга — новый ≥1024×1024.
