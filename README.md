@@ -217,7 +217,7 @@ HexForge is designed to keep the desktop application boundary explicit:
 - no secrets committed to the repository;
 - plugin manifests are verified and plugin execution is fuel-metered inside Wasmtime with capability restrictions.
 
-Security issues should be reported privately rather than through public issues.
+See [SECURITY.md](SECURITY.md) for the full policy. Security issues should be reported privately rather than through public issues.
 
 ---
 
