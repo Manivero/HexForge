@@ -2045,6 +2045,7 @@ dependencies = [
  "blake3",
  "hexforge-core",
  "hexforge-ops",
+ "hexforge-plugin-host",
  "hexforge-stream",
  "memmap2",
  "parking_lot",
@@ -2052,6 +2053,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "uuid",
+ "wat",
 ]
 
 [[package]]

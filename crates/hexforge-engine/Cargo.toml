@@ -19,3 +19,6 @@ memmap2 = "0.9"
 base64 = "0.22"
 
 [dev-dependencies]
+wat = "1"
+hexforge-plugin-host = { path = "../hexforge-plugin-host" }
+base64 = "0.22"
