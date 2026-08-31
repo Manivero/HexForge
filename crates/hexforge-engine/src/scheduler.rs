@@ -204,12 +204,16 @@ fn lookup_transform(
     node: &OperationNode,
     state: &AppState,
 ) -> HexForgeResult<&'static dyn hexforge_core::Transform> {
-    let transform = state.registry.get(&node.operation_id).ok_or_else(|| {
-        HexForgeError::internal_for_node(
-            node.id,
-            format!("unknown operation: {}", node.operation_id),
-        )
-    })?;
+    let transform = state
+        .registry
+        .read()
+        .get(&node.operation_id)
+        .ok_or_else(|| {
+            HexForgeError::internal_for_node(
+                node.id,
+                format!("unknown operation: {}", node.operation_id),
+            )
+        })?;
     if transform.version() != node.operation_version {
         return Err(HexForgeError::internal_for_node(
             node.id,
@@ -287,6 +291,7 @@ fn execute_merge_node(
 ) -> HexForgeResult<Arc<Vec<u8>>> {
     let merge = state
         .registry
+        .read()
         .get_merge(&node.operation_id)
         .ok_or_else(|| {
             HexForgeError::invalid_input(format!(
@@ -1408,12 +1413,12 @@ mod tests {
 
     #[test]
     fn cancellation_reaches_transform_context_mid_apply() {
-        let mut state = AppState::new(hexforge_ops::build_registry());
+        let state = AppState::new(hexforge_ops::build_registry());
         let armed = Arc::new(AtomicBool::new(false));
         let op: &'static CancelAwareOp = Box::leak(Box::new(CancelAwareOp {
             armed: Arc::clone(&armed),
         }));
-        state.registry.register(op);
+        state.registry.write().register(op);
         let root = root_node(&state, &[0u8; 4096], "test.cancel-aware");
 
         let token = Arc::new(AtomicBool::new(false));
@@ -1507,12 +1512,12 @@ mod tests {
         // канал, а не от чекпоинта планировщика.
         let big: Vec<u8> = vec![7u8; hexforge_stream::DEFAULT_CHUNK_SIZE_BYTES + 999];
 
-        let mut state = AppState::new(hexforge_ops::build_registry());
+        let state = AppState::new(hexforge_ops::build_registry());
         let armed = Arc::new(AtomicBool::new(false));
         let op: &'static CancelAwareStreamOp = Box::leak(Box::new(CancelAwareStreamOp {
             armed: Arc::clone(&armed),
         }));
-        state.registry.register(op);
+        state.registry.write().register(op);
 
         let root = root_node(&state, &big, "text.rot13");
         let cs = child(&state, "test.cancel-stream", root);

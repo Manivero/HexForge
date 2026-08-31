@@ -1,0 +1,30 @@
+package hexforge:plugin@0.1.0;
+
+/// Transform interface — WIT isomorphic to hexforge_core::Transform (PRD FR-6.4, arch §7).
+/// Plugin WASM component must export this world. Host (hexforge-plugin-host) imports
+/// nothing and exports this interface via wasmtime::component::bindgen!.
+interface transform {
+    record capabilities {
+        deterministic: bool,
+        streamable: bool,
+        /// "constant" | "per-chunk" | "full-buffer"
+        memory-cost: string,
+    }
+
+    /// Stable operation id, e.g. "custom.uppercase" — must be unique in registry.
+    get-id: func() -> string;
+    get-version: func() -> string;
+    get-display-name: func() -> string;
+    get-category: func() -> string;
+    /// JSON Schema (stringified JSON) for params form (FR-3.2).
+    get-params-schema: func() -> string;
+    get-capabilities: func() -> capabilities;
+    /// Pure transform: input bytes + params JSON -> output bytes or error string.
+    /// Must be deterministic if capabilities.deterministic == true.
+    /// Host enforces fuel and memory limits, traps are isolated.
+    apply: func(input: list<u8>, params: string) -> result<list<u8>, string>;
+}
+
+world hexforge-plugin {
+    export transform;
+}

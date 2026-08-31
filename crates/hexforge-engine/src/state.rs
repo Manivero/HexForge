@@ -248,7 +248,7 @@ const DEFAULT_OUTPUT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 const MAX_ACTIVE_CANCELLATIONS: usize = 64;
 
 pub struct AppState {
-    pub registry: TransformRegistry,
+    pub registry: RwLock<TransformRegistry>,
     pub sources: RwLock<SourceStore>,
     pub graph: RwLock<Graph>,
     /// Time-Travel история (FR-4): пишется при каждом успешном `run_node`,
@@ -270,13 +270,23 @@ impl AppState {
     /// Тестовый конструктор с переопределением бюджета кэша.
     pub fn with_cache_budget(registry: TransformRegistry, cache_max_bytes: usize) -> Self {
         Self {
-            registry,
+            registry: RwLock::new(registry),
             sources: RwLock::new(SourceStore::default()),
             graph: RwLock::new(Graph::new()),
             history: RwLock::new(History::default()),
             cache: Mutex::new(OutputCache::new(cache_max_bytes)),
             cancellations: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Регистрирует динамическую операцию (плагин) в реестре.
+    pub fn register_plugin(&self, transform: &'static dyn hexforge_core::Transform) {
+        self.registry.write().register(transform);
+    }
+
+    /// Регистрирует merge-операцию плагина.
+    pub fn register_plugin_merge(&self, transform: &'static dyn hexforge_core::MergeTransform) {
+        self.registry.write().register_merge(transform);
     }
 
     /// Регистрирует токен отмены; `false` = лимит активных запусков исчерпан.

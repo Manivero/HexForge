@@ -10,11 +10,13 @@ import type {
   DiffSnapshotsResponse,
   ExportRecipeRequest,
   GraphDto,
+  GrantCapabilityRequest,
   HexForgeError,
   ImportCyberChefRecipeRequest,
   ImportCyberChefRecipeResponse,
   ImportRecipeRequest,
   ImportRecipeResponse,
+  InstallPluginRequest,
   JumpToSnapshotRequest,
   OpenFileRequest,
   OpenFileResponse,
@@ -25,6 +27,7 @@ import type {
   PreviewBytesRequest,
   PreviewBytesResponse,
   ReleaseSourceRequest,
+  RevokeCapabilityRequest,
   RunNodeRequest,
   RunNodeResponse,
   SnapshotDto,
@@ -118,6 +121,18 @@ export function importRecipe(req: ImportRecipeRequest): Promise<ImportRecipeResp
 
 export function listPlugins(): Promise<PluginManifestDto[]> {
   return call<PluginManifestDto[]>("list_plugins");
+}
+
+export function installPlugin(req: InstallPluginRequest): Promise<PluginManifestDto> {
+  return call<PluginManifestDto>("install_plugin", { req });
+}
+
+export function grantCapability(req: GrantCapabilityRequest): Promise<boolean> {
+  return call<boolean>("grant_capability", { req });
+}
+
+export function revokeCapability(req: RevokeCapabilityRequest): Promise<boolean> {
+  return call<boolean>("revoke_capability", { req });
 }
 
 /** Декодирует base64Chunk из preview_bytes в Uint8Array для HexViewer/TextPreview. */
