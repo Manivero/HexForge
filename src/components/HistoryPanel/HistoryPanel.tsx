@@ -45,8 +45,6 @@ function layoutTree(snapshots: SnapshotDto[]): TreeNode[] {
   return out;
 }
 
-const ID_SLICE = 8;
-
 export function HistoryPanel() {
   const snapshots = useAppStore((s) => s.snapshots);
   const jumpingSnapshotId = useAppStore((s) => s.jumpingSnapshotId);

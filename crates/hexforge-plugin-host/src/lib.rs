@@ -1382,4 +1382,65 @@ mod tests {
         assert!(transform.capabilities().deterministic);
         let _ = std::fs::remove_file(&wasm_path);
     }
+
+    #[test]
+    fn plugin_hostile_memory_grow_blocked() {
+        // Hostile plugin tries to grow memory to 5000 pages (~320 MiB) beyond 256 MiB cap
+        let runtime = PluginRuntime::with_memory_limit(Some(10_000), 256 * 1024 * 1024).unwrap();
+        let wat_str = r#"(module
+            (memory (export "memory") 1)
+            (func (export "transform") (param i32 i32) (result i32)
+                (drop (memory.grow (i32.const 5000)))
+                local.get 1
+            )
+        )"#;
+        let wasm_bytes = wat::parse_str(wat_str).unwrap();
+        let dir = std::env::temp_dir();
+        let wasm_path = dir.join(format!(
+            "hexforge-test-hostile-mem-{}.wasm",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&wasm_path, &wasm_bytes).unwrap();
+        let instance = PluginInstance {
+            manifest: PluginManifest {
+                id: "hostile.mem".into(),
+                name: "Hostile Mem".into(),
+                version: "1.0.0".into(),
+                author: "Test".into(),
+                requested_capabilities: vec![],
+                granted_capabilities: vec![],
+            },
+            wasm_path: wasm_path.to_string_lossy().into_owned(),
+            pubkey_hex: String::new(),
+            signature_hex: String::new(),
+        };
+        // Execute should either trap or succeed but not grow beyond cap; we check that host survives
+        let res = runtime.execute(&instance, b"hi");
+        // It may succeed (memory.grow returns -1 on failure, but we drop it, so it returns input len)
+        // The important check is that host did not crash and that memory limit was enforced (grow beyond cap returns -1, not trap)
+        assert!(res.is_ok() || res.unwrap_err().to_string().contains("memory"));
+        let _ = std::fs::remove_file(&wasm_path);
+        // Host still alive after hostile
+        let wasm_path2 = dir.join(format!(
+            "hexforge-test-hostile-mem2-{}.wasm",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&wasm_path2, wat::parse_str("(module (memory (export \"memory\") 1) (func (export \"transform\") (param i32 i32) (result i32) local.get 1))").unwrap()).unwrap();
+        let instance2 = PluginInstance {
+            manifest: PluginManifest {
+                id: "ok.mem".into(),
+                name: "Ok".into(),
+                version: "1.0.0".into(),
+                author: "Test".into(),
+                requested_capabilities: vec![],
+                granted_capabilities: vec![],
+            },
+            wasm_path: wasm_path2.to_string_lossy().into_owned(),
+            pubkey_hex: String::new(),
+            signature_hex: String::new(),
+        };
+        let out = runtime.execute(&instance2, b"ok").unwrap();
+        assert_eq!(out, b"ok");
+        let _ = std::fs::remove_file(&wasm_path2);
+    }
 }

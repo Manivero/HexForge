@@ -536,7 +536,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => {
       const cur = s.selectedForDiff;
       if (cur.includes(id)) return { selectedForDiff: cur.filter((x) => x !== id) };
-      if (cur.length >= 2) return { selectedForDiff: [cur[1], id] };
+      if (cur.length >= 2) return { selectedForDiff: [cur[1]!, id] };
       return { selectedForDiff: [...cur, id] };
     }),
   clearDiffSelection: () => set({ selectedForDiff: [], diffText: null, diffError: null }),
@@ -548,7 +548,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ diffLoading: true, diffError: null, diffText: null });
     try {
-      const res = await ipcDiffSnapshots({ aSnapshotId: ids[0], bSnapshotId: ids[1] });
+      const res = await ipcDiffSnapshots({ aSnapshotId: ids[0]!, bSnapshotId: ids[1]! });
       set({ diffText: res.diffText, diffLoading: false });
     } catch (err) {
       set({ diffError: formatIpcError(err), diffLoading: false });

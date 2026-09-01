@@ -930,7 +930,7 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
         .collect()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallPluginRequest {
     pub wasm_path: String,
@@ -1450,6 +1450,24 @@ mod tests {
                 "grantedCapabilities": [],
             })
         );
+    }
+
+    #[test]
+    fn install_plugin_request_matches_ts_contract() {
+        let req = InstallPluginRequest {
+            wasm_path: "plugin.wasm".into(),
+            manifest_path: "manifest.json".into(),
+        };
+        assert_eq!(
+            serde_json::to_value(&req).unwrap(),
+            serde_json::json!({
+                "wasmPath": "plugin.wasm",
+                "manifestPath": "manifest.json",
+            })
+        );
+        // Verify error handling for invalid path (empty) is tested via validate_fs_path
+        assert!(validate_fs_path("", "wasmPath").is_err());
+        assert!(validate_fs_path("a\0b", "wasmPath").is_err());
     }
 
     #[test]

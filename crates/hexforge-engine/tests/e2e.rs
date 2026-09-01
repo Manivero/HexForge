@@ -478,3 +478,53 @@ fn e2e_history_error_handling_missing_snapshot() {
     let err2 = scheduler::diff_snapshots(&state, missing, missing).unwrap_err();
     assert!(err2.message.contains("unknown snapshot"));
 }
+
+#[test]
+fn e2e_replay_after_source_release_fails() {
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"replay-test".to_vec()));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert!(!out.is_empty());
+    let snap_id = state.history.read().ordered_snapshots()[0].id;
+    // Release source
+    assert!(state.sources.write().release(&h));
+    let err = scheduler::replay_snapshot(&state, snap_id).unwrap_err();
+    assert!(
+        err.message.contains("has been released") || err.message.contains("source"),
+        "expected source released error, got {err:?}"
+    );
+}
+
+#[test]
+fn e2e_large_input_streaming_1m() {
+    // Large input (1 MiB) via streamable rot13 should succeed and be correct
+    let state = AppState::new(hexforge_ops::build_registry());
+    let data = vec![b'a'; 1024 * 1024];
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(data.clone()));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), data.len());
+    assert_eq!(out[0], b'n'); // rot13 a -> n
+    assert_eq!(out[1024 * 1024 - 1], b'n');
+}

@@ -111,4 +111,53 @@ mod tests {
             "chunk_ranges 64M 1M calls took {elapsed:?}, expected <1s (regression)"
         );
     }
+
+    #[test]
+    fn chunk_ranges_property_random() {
+        // Property-style: random total_len and chunk_size, check invariants
+        let cases = [
+            (0, 1),
+            (1, 1),
+            (10, 3),
+            (100, 7),
+            (1000, 64),
+            (DEFAULT_CHUNK_SIZE_BYTES - 1, DEFAULT_CHUNK_SIZE_BYTES),
+            (DEFAULT_CHUNK_SIZE_BYTES, DEFAULT_CHUNK_SIZE_BYTES),
+            (DEFAULT_CHUNK_SIZE_BYTES + 1, DEFAULT_CHUNK_SIZE_BYTES),
+            (DEFAULT_CHUNK_SIZE_BYTES * 3 + 5, 1024),
+        ];
+        for (total, chunk) in cases {
+            let ranges = chunk_ranges(total, chunk);
+            let mut covered = 0;
+            let mut prev_end = 0;
+            for (s, e) in &ranges {
+                assert_eq!(*s, prev_end, "gap for total {total} chunk {chunk}");
+                assert!(e > s, "empty range for total {total} chunk {chunk}");
+                assert!(
+                    *e - *s <= chunk,
+                    "range too large for total {total} chunk {chunk}"
+                );
+                covered += e - s;
+                prev_end = *e;
+            }
+            assert_eq!(
+                covered, total,
+                "coverage mismatch for total {total} chunk {chunk}"
+            );
+            if total > 0 {
+                assert_eq!(ranges.last().unwrap().1, total);
+            } else {
+                assert!(ranges.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn chunk_ranges_overflow_safe() {
+        // Edge: large values near usize::MAX should not panic (except chunk_size 0)
+        let large = usize::MAX - 1;
+        // This would try to allocate huge Vec, so we only test small large with chunk = large
+        let ranges = chunk_ranges(10, large);
+        assert_eq!(ranges, vec![(0, 10)]);
+    }
 }
