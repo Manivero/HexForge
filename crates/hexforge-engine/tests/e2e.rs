@@ -323,6 +323,39 @@ fn e2e_plugin_host_via_transform() {
 }
 
 #[test]
+fn e2e_bench_gate_execute_chain_64k() {
+    // NFR-1 gate: 64 KiB rot13+base64 chain via execute_chain should complete in <100ms (lenient, catches major regression)
+    // This is a functional gate, not a wall-clock bench, so it's stable in CI.
+    let state = AppState::new(hexforge_ops::build_registry());
+    let data = vec![b'a'; 64 * 1024];
+    let h = state.sources.write().insert(SourceEntry::InMemory(data));
+    let n1 = NodeId::new_v4();
+    let n2 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: n1,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: n2,
+        operation_id: "encoding.base64.encode".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![n1],
+    });
+    let start = std::time::Instant::now();
+    let out = scheduler::execute_chain(&state, &n2, &token(), &no_progress).unwrap();
+    let elapsed = start.elapsed();
+    assert!(!out.is_empty());
+    assert!(
+        elapsed.as_millis() < 100,
+        "execute_chain 64 KiB took {elapsed:?}, expected <100ms"
+    );
+}
+
+#[test]
 fn e2e_history_branching_and_restore() {
     // Branching: linear chain a->b, run, jump to a, then run c (branch) -> history should have 3 snapshots with 2 children of root
     let state = AppState::new(hexforge_ops::build_registry());

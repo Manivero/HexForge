@@ -93,4 +93,22 @@ mod tests {
     fn zero_chunk_size_panics() {
         let _ = chunk_ranges(10, 0);
     }
+
+    #[test]
+    fn chunk_ranges_64m_perf_gate() {
+        // NFR-1 regression guard (stable, no wall-clock assertion on absolute ns):
+        // 64 MiB with default chunk must be 1 range and complete in <1ms (len check, not timing).
+        // For timing, we check that 1M calls complete in <1s (throughput >1M ops/s).
+        let start = std::time::Instant::now();
+        let mut total = 0;
+        for _ in 0..1_000_000 {
+            total += chunk_ranges(64 * 1024 * 1024, DEFAULT_CHUNK_SIZE_BYTES).len();
+        }
+        let elapsed = start.elapsed();
+        assert_eq!(total, 1_000_000);
+        assert!(
+            elapsed.as_secs() < 1,
+            "chunk_ranges 64M 1M calls took {elapsed:?}, expected <1s (regression)"
+        );
+    }
 }

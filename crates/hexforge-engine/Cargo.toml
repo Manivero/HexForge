@@ -22,3 +22,8 @@ base64 = "0.22"
 wat = "1"
 hexforge-plugin-host = { path = "../hexforge-plugin-host" }
 base64 = "0.22"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "engine"
+harness = false
