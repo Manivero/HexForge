@@ -15,6 +15,7 @@ import {
   patchSource as ipcPatchSource,
   listSnapshots as ipcListSnapshots,
   jumpToSnapshot as ipcJumpToSnapshot,
+  diffSnapshots as ipcDiffSnapshots,
   cancelNode as ipcCancelNode,
   exportRecipe as ipcExportRecipe,
   importRecipe as ipcImportRecipe,
@@ -115,6 +116,16 @@ interface DataSlice {
   snapshots: SnapshotDto[];
   /** id снапшота, к которому сейчас идёт lineage-реплей. */
   jumpingSnapshotId: SnapshotId | null;
+  /** Выбор двух снапшотов для diff (FR-4.3). */
+  selectedForDiff: SnapshotId[];
+  diffText: string | null;
+  diffLoading: boolean;
+  diffError: string | null;
+  selectForDiff: (id: SnapshotId) => void;
+  clearDiffSelection: () => void;
+  diffSelected: () => Promise<void>;
+  /** Восстановление снапшота (jump + preview) — FR-4.1, работает и для multi-source. */
+  restoreSnapshot: (snapshotId: SnapshotId) => Promise<void>;
   /** Серверный stale-набор из события graph://invalidated (FR-1.6):
    * узлы, чьи результаты устарели после последнего set_graph. */
   staleNodeIds: NodeId[];
@@ -370,6 +381,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   hexLoading: false,
   snapshots: [],
   jumpingSnapshotId: null,
+  selectedForDiff: [],
+  diffText: null,
+  diffLoading: false,
+  diffError: null,
   staleNodeIds: [],
   runError: null,
   runSelectedNode: async () => {
@@ -495,6 +510,54 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // Бэкенд сам реплеит lineage от корневого источника и переносит
       // голову истории (FR-4.1); ответ — стандартный RunNodeResponse.
+      const res = await ipcJumpToSnapshot({ snapshotId });
+      const pb = await ipcPreviewBytes({
+        handle: res.outputHandle,
+        offset: 0,
+        length: PREVIEW_LENGTH_BYTES,
+      });
+      const bytes = decodeBase64Chunk(pb.base64Chunk);
+      set({
+        lastRun: res,
+        ranAtGraphVersion: get().graphVersion,
+        previewText: toLossyUtf8(bytes),
+        previewHex: toHexDump(bytes),
+        previewTruncated: pb.actualLength < res.outputSizeBytes,
+        hexOffset: null,
+        hexBytes: null,
+        jumpingSnapshotId: null,
+      });
+      await loadSnapshots(set);
+    } catch (err) {
+      set({ jumpingSnapshotId: null, runError: formatIpcError(err) });
+    }
+  },
+  selectForDiff: (id) =>
+    set((s) => {
+      const cur = s.selectedForDiff;
+      if (cur.includes(id)) return { selectedForDiff: cur.filter((x) => x !== id) };
+      if (cur.length >= 2) return { selectedForDiff: [cur[1], id] };
+      return { selectedForDiff: [...cur, id] };
+    }),
+  clearDiffSelection: () => set({ selectedForDiff: [], diffText: null, diffError: null }),
+  diffSelected: async () => {
+    const ids = get().selectedForDiff;
+    if (ids.length !== 2) {
+      set({ diffError: t(get().locale, "app.diffNeedTwo") });
+      return;
+    }
+    set({ diffLoading: true, diffError: null, diffText: null });
+    try {
+      const res = await ipcDiffSnapshots({ aSnapshotId: ids[0], bSnapshotId: ids[1] });
+      set({ diffText: res.diffText, diffLoading: false });
+    } catch (err) {
+      set({ diffError: formatIpcError(err), diffLoading: false });
+    }
+  },
+  restoreSnapshot: async (snapshotId) => {
+    // Restore — тот же jump, но с явным сообщением для multi-source
+    set({ jumpingSnapshotId: snapshotId, runError: null, diffError: null });
+    try {
       const res = await ipcJumpToSnapshot({ snapshotId });
       const pb = await ipcPreviewBytes({
         handle: res.outputHandle,

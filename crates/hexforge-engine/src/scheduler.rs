@@ -24,6 +24,7 @@ use hexforge_stream::{chunk_ranges, DEFAULT_CHUNK_SIZE_BYTES};
 use parking_lot::Mutex as StageMutex;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -779,6 +780,38 @@ pub fn replay_snapshot(
             "unknown snapshot: {snapshot_id}"
         )));
     };
+    // Multi-source merge replay: if target snapshot's node has N>1 inputs, use resolve_node directly
+    // (history lineage is single-parent, not N-ary). This keeps execution correct for multi-source.
+    let is_merge = {
+        let history = state.history.read();
+        let snap_opt = history.snapshots.get(&snapshot_id).cloned();
+        drop(history);
+        if let Some(snap) = snap_opt {
+            let graph = state.graph.read();
+            let is_m = graph
+                .nodes
+                .get(&snap.node_id)
+                .map(|n| n.inputs.len() > 1)
+                .unwrap_or(false);
+            drop(graph);
+            if is_m {
+                let token: CancellationToken = Arc::new(AtomicBool::new(false));
+                let out = resolve_node(&snap.node_id, state, &token, &|_| {})?;
+                if Some(blake3::hash(out.as_slice())) != snap.output_content_hash {
+                    return Err(HexForgeError::internal_for_node(
+                        snap.node_id,
+                        format!(
+                            "replay mismatch at {}@{}: output hash differs",
+                            snap.operation_id, snap.operation_version
+                        ),
+                    ));
+                }
+                return Ok(out);
+            }
+        }
+        false
+    };
+    let _ = is_merge;
 
     // Корень lineage обязан быть source-root: его узел живёт в текущем графе
     // и ссылается на источник по params.sourceHandle.
