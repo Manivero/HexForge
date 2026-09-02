@@ -17,4 +17,5 @@ wasmtime = { version = "48", features = ["cranelift", "component-model-async", "
 wasi = { version = "0.14", features = ["core"] }
 anyhow = "1"
 wat = "1"
+wit-component = "0.230"
 uuid = { workspace = true }
