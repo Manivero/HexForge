@@ -138,6 +138,12 @@ export function HistoryPanel() {
                     </span>
                     <span className="flex shrink-0 items-center gap-1 font-mono text-2xs text-text-muted">
                       <span title={snap.inputContentHash}>in:{snap.inputContentHash.slice(0, 6)}</span>
+                      {snap.inputContentHashes && snap.inputContentHashes.length > 0 && (
+                        <span title={snap.inputContentHashes.join(",")}>hashes:{snap.inputContentHashes.length}</span>
+                      )}
+                      {snap.inputSnapshotIds.length > 0 && (
+                        <span title={snap.inputSnapshotIds.join(",")}>inputs:{snap.inputSnapshotIds.length}</span>
+                      )}
                       <span title={snap.outputContentHash ?? ""}>out:{(snap.outputContentHash ?? "").slice(0, 6)}</span>
                       <span title={paramsStr}>{paramsStr.slice(0, 8)}</span>
                       <span>v{snap.operationVersion}</span>

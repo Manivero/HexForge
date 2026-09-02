@@ -480,6 +480,255 @@ fn e2e_history_error_handling_missing_snapshot() {
 }
 
 #[test]
+fn e2e_snapshot_v2_multi_source_replay_after_source_change() {
+    // Main requirement: N-ary replay must work even after source bytes have changed
+    let state = AppState::new(hexforge_ops::build_registry());
+    let ha = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"AAA".to_vec()));
+    let hb = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"BBB".to_vec()));
+    let na = NodeId::new_v4();
+    let nb = NodeId::new_v4();
+    let nc = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: na,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": ha.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: nb,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": hb.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: nc,
+        operation_id: "streaming.concat".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![na, nb],
+    });
+    let out1 = scheduler::execute_chain(&state, &nc, &token(), &no_progress).unwrap();
+    assert_eq!(out1.as_slice(), b"NNNOOO");
+    let snap_id = state.history.read().current.unwrap();
+    let snap = state
+        .history
+        .read()
+        .snapshots
+        .get(&snap_id)
+        .cloned()
+        .unwrap();
+    // v2 must have input_snapshot_ids and input_content_hashes with 2 entries
+    assert_eq!(snap.input_snapshot_ids.len(), 2);
+    assert_eq!(snap.input_content_hashes.as_ref().unwrap().len(), 2);
+    // Change sources after snapshot: keep old handles for history (do not release), just create new handles and point graph to them
+    let ha2 = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"XXX".to_vec()));
+    let hb2 = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"YYY".to_vec()));
+    // Update graph nodes to point to new handles (simulating source change, but snapshot should still replay old)
+    state.graph.write().insert_node(OperationNode {
+        id: na,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": ha2.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: nb,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": hb2.to_string() }),
+        inputs: vec![],
+    });
+    // Replay should still give old output (NNNOOO) even though current sources are XXX/YYY -> KKK/LLL
+    let replayed = scheduler::replay_snapshot(&state, snap_id).unwrap();
+    assert_eq!(replayed.as_slice(), b"NNNOOO");
+    // Diff between old snapshot and new execution should not be equal
+    let out2 = scheduler::execute_chain(&state, &nc, &token(), &no_progress).unwrap();
+    assert_eq!(out2.as_slice(), b"KKKLLL"); // rot13 XXX->KKK, YYY->LLL
+    let diff =
+        scheduler::diff_snapshots(&state, snap_id, state.history.read().current.unwrap()).unwrap();
+    assert_ne!(diff, "equal\n");
+}
+
+#[test]
+fn e2e_snapshot_v2_single_source_replay_still_works() {
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"Hello".to_vec()));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    let snap_id = state.history.read().current.unwrap();
+    let snap = state
+        .history
+        .read()
+        .snapshots
+        .get(&snap_id)
+        .cloned()
+        .unwrap();
+    // Single-source v2: input_content_hashes is None (backward compat), input_snapshot_ids empty
+    assert!(snap.input_content_hashes.is_none());
+    assert!(snap.input_snapshot_ids.is_empty());
+    let replayed = scheduler::replay_snapshot(&state, snap_id).unwrap();
+    assert_eq!(replayed.as_slice(), out.as_slice());
+}
+
+#[test]
+fn e2e_snapshot_v2_restore_branch() {
+    // Restore branch: jump to first snapshot, then run a different operation -> branching
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"branch".to_vec()));
+    let a = NodeId::new_v4();
+    let b = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: a,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: b,
+        operation_id: "encoding.base64.encode".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![a],
+    });
+    let _out1 = scheduler::execute_chain(&state, &b, &token(), &no_progress).unwrap();
+    let snaps1: Vec<_> = state
+        .history
+        .read()
+        .ordered_snapshots()
+        .iter()
+        .map(|s| s.id)
+        .collect();
+    let first = snaps1[0];
+    // Jump to first
+    let _replayed = scheduler::replay_snapshot(&state, first).unwrap();
+    // Simulate jump by setting current
+    state.history.write().current = Some(first);
+    let c = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: c,
+        operation_id: "text.reverse".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![a],
+    });
+    let _out2 = scheduler::execute_chain(&state, &c, &token(), &no_progress).unwrap();
+    let snaps2: Vec<_> = state
+        .history
+        .read()
+        .ordered_snapshots()
+        .iter()
+        .map(|s| s.id)
+        .collect();
+    // Should have 3 snapshots: a, b, c (a is parent of both b and c)
+    assert_eq!(snaps2.len(), 3);
+    // Verify branching: b and c should have same parent (first)
+    let b_snap = state
+        .history
+        .read()
+        .snapshots
+        .get(&snaps2[1])
+        .cloned()
+        .unwrap();
+    let c_snap = state
+        .history
+        .read()
+        .snapshots
+        .get(&snaps2[2])
+        .cloned()
+        .unwrap();
+    assert_eq!(b_snap.parent, Some(first));
+    assert_eq!(c_snap.parent, Some(first));
+}
+
+#[test]
+fn e2e_snapshot_v2_diff_between_nary_snapshots() {
+    let state = AppState::new(hexforge_ops::build_registry());
+    let ha = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"AAA".to_vec()));
+    let hb = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"BBB".to_vec()));
+    let hc = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"CCC".to_vec()));
+    let na = NodeId::new_v4();
+    let nb = NodeId::new_v4();
+    let nc1 = NodeId::new_v4();
+    let nc2 = NodeId::new_v4();
+    for (id, h) in [(na, ha), (nb, hb)] {
+        state.graph.write().insert_node(OperationNode {
+            id,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": h.to_string() }),
+            inputs: vec![],
+        });
+    }
+    state.graph.write().insert_node(OperationNode {
+        id: nc1,
+        operation_id: "streaming.concat".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![na, nb],
+    });
+    let _out1 = scheduler::execute_chain(&state, &nc1, &token(), &no_progress).unwrap();
+    let snap1 = state.history.read().current.unwrap();
+    // Change second source to CCC and create new concat
+    let nb2 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nb2,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": hc.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: nc2,
+        operation_id: "streaming.concat".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![na, nb2],
+    });
+    let _out2 = scheduler::execute_chain(&state, &nc2, &token(), &no_progress).unwrap();
+    let snap2 = state.history.read().current.unwrap();
+    let diff = scheduler::diff_snapshots(&state, snap1, snap2).unwrap();
+    assert_ne!(diff, "equal\n");
+    assert!(diff.contains("snapshot"));
+}
+
+#[test]
 fn e2e_replay_after_source_release_fails() {
     let state = AppState::new(hexforge_ops::build_registry());
     let h = state

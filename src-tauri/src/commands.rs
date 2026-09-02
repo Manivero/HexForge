@@ -832,6 +832,8 @@ pub struct SnapshotDto {
     pub operation_version: String,
     pub params: serde_json::Value,
     pub input_content_hash: String,
+    pub input_content_hashes: Option<Vec<String>>,
+    pub input_snapshot_ids: Vec<String>,
     pub output_content_hash: Option<String>,
 }
 
@@ -857,6 +859,15 @@ fn list_snapshots_inner(state: &AppState) -> Vec<SnapshotDto> {
             operation_version: s.operation_version.clone(),
             params: s.params.clone(),
             input_content_hash: s.input_content_hash.to_hex().to_string(),
+            input_content_hashes: s
+                .input_content_hashes
+                .as_ref()
+                .map(|v| v.iter().map(|h| h.to_hex().to_string()).collect()),
+            input_snapshot_ids: s
+                .input_snapshot_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect(),
             output_content_hash: s.output_content_hash.map(|h| h.to_hex().to_string()),
         })
         .collect()
@@ -1409,6 +1420,8 @@ mod tests {
             operation_version: "1.0.0".into(),
             params: serde_json::json!({}),
             input_content_hash: "aa".repeat(32),
+            input_content_hashes: None,
+            input_snapshot_ids: vec![],
             output_content_hash: Some("bb".repeat(32)),
         };
         // parent: null соответствует TS `SnapshotId | null`.
@@ -1422,6 +1435,8 @@ mod tests {
                 "operationVersion": "1.0.0",
                 "params": {},
                 "inputContentHash": "aa".repeat(32),
+                "inputContentHashes": null,
+                "inputSnapshotIds": [],
                 "outputContentHash": "bb".repeat(32),
             })
         );

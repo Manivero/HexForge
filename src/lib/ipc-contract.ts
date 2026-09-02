@@ -159,6 +159,8 @@ export interface SnapshotDto {
   operationVersion: string;
   params: unknown;
   inputContentHash: string;
+  inputContentHashes?: string[] | null;
+  inputSnapshotIds: string[];
   outputContentHash: string | null;
 }
 

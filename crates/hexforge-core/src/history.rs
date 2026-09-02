@@ -20,8 +20,15 @@ pub struct Snapshot {
     pub operation_id: String,
     pub operation_version: String,
     pub params: serde_json::Value,
+    // v1: single input hash (kept for backward compat, still used for single-source)
     #[serde(with = "hash_hex")]
     pub input_content_hash: blake3::Hash,
+    // v2: N-ary input hashes (None for single-source legacy, Some(vec) for merge)
+    #[serde(default, with = "hash_vec_hex_opt")]
+    pub input_content_hashes: Option<Vec<blake3::Hash>>,
+    // v2: snapshot ids of inputs at execution time (for N-ary replay)
+    #[serde(default)]
+    pub input_snapshot_ids: Vec<SnapshotId>,
     #[serde(with = "option_hash_hex")]
     pub output_content_hash: Option<blake3::Hash>,
 }
@@ -31,12 +38,30 @@ impl Snapshot {
     /// дают одинаковый результат (при условии `capabilities().deterministic == true`
     /// для соответствующей операции) — используется для дедупликации кэша.
     pub fn reproducibility_key(&self) -> String {
+        // v2: for N-ary, use all hashes joined by `,`; for single, use single hash (backward compat)
+        let input_hex = if let Some(hs) = &self.input_content_hashes {
+            hs.iter()
+                .map(|h| h.to_hex().to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        } else {
+            self.input_content_hash.to_hex().to_string()
+        };
         reproducibility_key(
             &self.operation_id,
             &self.operation_version,
-            &self.input_content_hash.to_hex()[..],
+            &input_hex,
             &self.params,
         )
+    }
+
+    /// All input hashes (v2 if present, else single)
+    pub fn all_input_hashes(&self) -> Vec<blake3::Hash> {
+        if let Some(hs) = &self.input_content_hashes {
+            hs.clone()
+        } else {
+            vec![self.input_content_hash]
+        }
     }
 }
 
@@ -157,6 +182,36 @@ mod option_hash_hex {
     }
 }
 
+mod hash_vec_hex_opt {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(
+        hashes: &Option<Vec<blake3::Hash>>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        match hashes {
+            Some(v) => {
+                let hexes: Vec<String> = v.iter().map(|h| h.to_hex().to_string()).collect();
+                hexes.serialize(s)
+            }
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Vec<blake3::Hash>>, D::Error> {
+        let opt = Option::<Vec<String>>::deserialize(d)?;
+        opt.map(|vec_hex| {
+            vec_hex
+                .into_iter()
+                .map(|hex| hex.parse().map_err(serde::de::Error::custom))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,6 +229,8 @@ mod tests {
             operation_version: "1.0.0".into(),
             params: serde_json::json!({}),
             input_content_hash: blake3::hash(b"root"),
+            input_content_hashes: None,
+            input_snapshot_ids: Vec::new(),
             output_content_hash: None,
         };
         let root_id = root.id;
@@ -187,6 +244,8 @@ mod tests {
             operation_version: "1.0.0".into(),
             params: serde_json::json!({}),
             input_content_hash: blake3::hash(b"child"),
+            input_content_hashes: None,
+            input_snapshot_ids: Vec::new(),
             output_content_hash: None,
         };
         let child_id = child.id;
@@ -253,7 +312,54 @@ mod tests {
             operation_version: "1.0.0".into(),
             params: serde_json::json!({}),
             input_content_hash: blake3::hash(b"input"),
+            input_content_hashes: None,
+            input_snapshot_ids: Vec::new(),
             output_content_hash: Some(blake3::hash(b"output")),
         }
+    }
+
+    #[test]
+    fn snapshot_v2_backward_compat_deserializes_v1() {
+        // v1 JSON without input_content_hashes/input_snapshot_ids should deserialize to v2 with None/empty
+        let v1_json = serde_json::json!({
+            "id": "00000000-0000-4000-8000-000000000001",
+            "parent": null,
+            "node_id": "00000000-0000-4000-8000-000000000002",
+            "operation_id": "text.rot13",
+            "operation_version": "1.0.0",
+            "params": {},
+            "input_content_hash": blake3::hash(b"input").to_hex().to_string(),
+            "output_content_hash": blake3::hash(b"output").to_hex().to_string()
+        });
+        let snap: Snapshot = serde_json::from_value(v1_json).unwrap();
+        assert!(snap.input_content_hashes.is_none());
+        assert!(snap.input_snapshot_ids.is_empty());
+        assert_eq!(snap.all_input_hashes(), vec![snap.input_content_hash]);
+    }
+
+    #[test]
+    fn snapshot_v2_reproducibility_key_uses_all_hashes() {
+        let mut snap = snapshot_for_test(Uuid::new_v4(), None);
+        let h1 = blake3::hash(b"a");
+        let h2 = blake3::hash(b"b");
+        snap.input_content_hash = h1;
+        snap.input_content_hashes = Some(vec![h1, h2]);
+        let key = snap.reproducibility_key();
+        assert!(key.contains(&h1.to_hex().to_string()));
+        assert!(key.contains(&h2.to_hex().to_string()));
+        assert!(key.contains(","));
+    }
+
+    #[test]
+    fn snapshot_v2_all_input_hashes_single_vs_multi() {
+        let mut single = snapshot_for_test(Uuid::new_v4(), None);
+        single.input_content_hash = blake3::hash(b"single");
+        single.input_content_hashes = None;
+        assert_eq!(single.all_input_hashes(), vec![blake3::hash(b"single")]);
+
+        let mut multi = snapshot_for_test(Uuid::new_v4(), None);
+        multi.input_content_hash = blake3::hash(b"combined");
+        multi.input_content_hashes = Some(vec![blake3::hash(b"a"), blake3::hash(b"b")]);
+        assert_eq!(multi.all_input_hashes().len(), 2);
     }
 }

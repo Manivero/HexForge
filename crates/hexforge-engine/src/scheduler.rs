@@ -24,7 +24,6 @@ use hexforge_stream::{chunk_ranges, DEFAULT_CHUNK_SIZE_BYTES};
 use parking_lot::Mutex as StageMutex;
 use serde::Serialize;
 use std::borrow::Cow;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -96,6 +95,16 @@ fn resolve_node(
     token: &CancellationToken,
     on_progress: ProgressSink<'_>,
 ) -> HexForgeResult<Arc<Vec<u8>>> {
+    let (out, _) = resolve_node_with_snapshot(node_id, state, token, on_progress)?;
+    Ok(out)
+}
+
+fn resolve_node_with_snapshot(
+    node_id: &NodeId,
+    state: &AppState,
+    token: &CancellationToken,
+    on_progress: ProgressSink<'_>,
+) -> HexForgeResult<(Arc<Vec<u8>>, hexforge_core::SnapshotId)> {
     check_cancelled(node_id, token)?;
 
     let node = {
@@ -115,45 +124,71 @@ fn resolve_node(
     // исполняется универсальным путём ниже.
     if node.inputs.len() == 1 {
         if let Some(fusion) = build_stream_fusion(state, &node)? {
-            return execute_fused_run(state, fusion, token, on_progress);
+            let out = execute_fused_run(state, fusion, token, on_progress)?;
+            let sid = state.history.read().current.unwrap_or_else(Uuid::new_v4);
+            return Ok((out, sid));
         }
     }
 
     // Входы: 0 — источник из SourceStore, 1 — рекурсивный выход родителя,
     // N — merge-ветка (порядок inputs — часть контракта операции).
-    let inputs: Vec<Arc<Vec<u8>>> = match node.inputs.len() {
-        0 => vec![resolve_source_input(&node, node_id, state)?],
+    // Для Snapshot v2 собираем также input_snapshot_ids и input_hashes.
+    let (inputs, input_snapshot_ids, input_hashes): (
+        Vec<Arc<Vec<u8>>>,
+        Vec<hexforge_core::SnapshotId>,
+        Vec<blake3::Hash>,
+    ) = match node.inputs.len() {
+        0 => {
+            let src = resolve_source_input(&node, node_id, state)?;
+            let h = blake3::hash(&src);
+            // Для source-узла input_snapshot_ids пуст, но для v2 храним пустой vec
+            (vec![src], Vec::new(), vec![h])
+        }
         1 => {
-            let parent_output = resolve_node(&node.inputs[0], state, token, on_progress)?;
+            let (parent_output, parent_sid) =
+                resolve_node_with_snapshot(&node.inputs[0], state, token, on_progress)?;
             check_cancelled(node_id, token)?;
-            vec![parent_output]
+            let h = blake3::hash(&parent_output);
+            (vec![parent_output], vec![parent_sid], vec![h])
         }
         _ => {
             let mut resolved = Vec::with_capacity(node.inputs.len());
+            let mut sids = Vec::with_capacity(node.inputs.len());
+            let mut hashes = Vec::with_capacity(node.inputs.len());
             for input_id in &node.inputs {
-                resolved.push(resolve_node(input_id, state, token, on_progress)?);
+                let (out, sid) = resolve_node_with_snapshot(input_id, state, token, on_progress)?;
+                let h = blake3::hash(&out);
+                resolved.push(out);
+                sids.push(sid);
+                hashes.push(h);
                 check_cancelled(node_id, token)?;
             }
-            resolved
+            (resolved, sids, hashes)
         }
     };
 
     // Memoization: хэш входа считается один раз и идёт и в ключ кэша, и в snapshot истории.
-    // Для merge-узлов (N>1) ключ — комбинированный хэш всех входов (конкатенация их blake3),
-    // чтобы разные вторые входы не давали коллизию по первому (FR-1.4).
-    let combined_input_hash = if inputs.len() == 1 {
-        blake3::hash(&inputs[0])
+    // Для merge-узлов (N>1) ключ — все hashes через `,` (v2), чтобы разные вторые входы не давали коллизию (FR-1.4).
+    let (combined_input_hash, input_hex) = if input_hashes.len() == 1 {
+        let h = input_hashes[0];
+        (h, h.to_hex().to_string())
     } else {
         let mut hasher = blake3::Hasher::new();
-        for inp in &inputs {
-            hasher.update(blake3::hash(inp).as_bytes());
+        for h in &input_hashes {
+            hasher.update(h.as_bytes());
         }
-        hasher.finalize()
+        let combined = hasher.finalize();
+        let hex = input_hashes
+            .iter()
+            .map(|h| h.to_hex().to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        (combined, hex)
     };
     let cache_key = hexforge_core::reproducibility_key(
         &node.operation_id,
         &node.operation_version,
-        &combined_input_hash.to_hex()[..],
+        &input_hex,
         &node.params,
     );
 
@@ -163,9 +198,28 @@ fn resolve_node(
         // нулевыми узлами и смещал голову при прыжках.
         // История — граф состояний: повтор идентичного запуска переиспользует
         // существующий снапшот (head остаётся), не создавая дубль.
-        record_output(&node, state, combined_input_hash, blake3::hash(&cached));
+        let input_hashes_opt = if input_hashes.len() > 1 {
+            Some(input_hashes.clone())
+        } else {
+            None
+        };
+        record_output(
+            &node,
+            state,
+            combined_input_hash,
+            blake3::hash(&cached),
+            input_hashes_opt,
+            input_snapshot_ids.clone(),
+        );
         emit_progress(on_progress, node_id, cached.len());
-        return Ok(cached);
+        return Ok((
+            cached,
+            state
+                .history
+                .read()
+                .find_by_key(&cache_key)
+                .unwrap_or_else(|| state.history.read().current.unwrap_or_else(Uuid::new_v4)),
+        ));
     }
 
     let output: Arc<Vec<u8>> = if node.inputs.len() > 1 {
@@ -174,11 +228,26 @@ fn resolve_node(
         execute_unary_node(&node, state, token, Arc::clone(&inputs[0]))?
     };
 
-    state.cache.lock().put(cache_key, Arc::clone(&output));
+    state
+        .cache
+        .lock()
+        .put(cache_key.clone(), Arc::clone(&output));
     emit_progress(on_progress, node_id, output.len());
-    record_output(&node, state, combined_input_hash, blake3::hash(&output));
+    let input_hashes_opt = if input_hashes.len() > 1 {
+        Some(input_hashes.clone())
+    } else {
+        None
+    };
+    let sid = record_output(
+        &node,
+        state,
+        combined_input_hash,
+        blake3::hash(&output),
+        input_hashes_opt,
+        input_snapshot_ids.clone(),
+    );
 
-    Ok(output)
+    Ok((output, sid))
 }
 
 /// Байты корневого узла: SourceStore по `params.sourceHandle`.
@@ -504,7 +573,7 @@ fn finalize_fused(
         let st = stage.lock();
         let input_hash = st.input_hasher.finalize();
         let output_hash = st.output_hasher.finalize();
-        record_output(&st.node, state, input_hash, output_hash);
+        record_output(&st.node, state, input_hash, output_hash, None, Vec::new());
 
         if i == last_index {
             let key = hexforge_core::reproducibility_key(
@@ -780,24 +849,67 @@ pub fn replay_snapshot(
             "unknown snapshot: {snapshot_id}"
         )));
     };
-    // Multi-source merge replay: if target snapshot's node has N>1 inputs, use resolve_node directly
-    // (history lineage is single-parent, not N-ary). This keeps execution correct for multi-source.
-    let is_merge = {
+    // Multi-source merge replay v2: if snapshot has input_snapshot_ids (N>1), replay each input historically
+    {
         let history = state.history.read();
-        let snap_opt = history.snapshots.get(&snapshot_id).cloned();
-        drop(history);
-        if let Some(snap) = snap_opt {
-            let graph = state.graph.read();
-            let is_m = graph
-                .nodes
-                .get(&snap.node_id)
-                .map(|n| n.inputs.len() > 1)
-                .unwrap_or(false);
-            drop(graph);
-            if is_m {
-                let token: CancellationToken = Arc::new(AtomicBool::new(false));
-                let out = resolve_node(&snap.node_id, state, &token, &|_| {})?;
-                if Some(blake3::hash(out.as_slice())) != snap.output_content_hash {
+        if let Some(snap) = history.snapshots.get(&snapshot_id).cloned() {
+            if !snap.input_snapshot_ids.is_empty() && snap.input_snapshot_ids.len() > 1 {
+                drop(history);
+                // Replay each input snapshot historically
+                let mut input_outputs: Vec<Arc<Vec<u8>>> = Vec::new();
+                let mut input_hashes = Vec::new();
+                for inp_sid in &snap.input_snapshot_ids {
+                    let out = replay_snapshot(state, *inp_sid)?;
+                    input_hashes.push(blake3::hash(&out));
+                    input_outputs.push(out);
+                }
+                // Verify input hashes match snapshot's input_content_hashes (if present)
+                if let Some(expected_hashes) = &snap.input_content_hashes {
+                    if expected_hashes.len() != input_hashes.len() {
+                        return Err(HexForgeError::internal_for_node(
+                            snap.node_id,
+                            "replay mismatch: input hashes count differs",
+                        ));
+                    }
+                    for (actual, expected) in input_hashes.iter().zip(expected_hashes) {
+                        if actual != expected {
+                            return Err(HexForgeError::internal_for_node(
+                                snap.node_id,
+                                "replay mismatch: input hash diverged",
+                            ));
+                        }
+                    }
+                }
+                // Execute merge via Transform
+                let node = {
+                    let graph = state.graph.read();
+                    graph.nodes.get(&snap.node_id).cloned().ok_or_else(|| {
+                        HexForgeError::internal_for_node(
+                            snap.node_id,
+                            format!("node {} not found for replay", snap.node_id),
+                        )
+                    })?
+                };
+                let merge = state
+                    .registry
+                    .read()
+                    .get_merge(&node.operation_id)
+                    .ok_or_else(|| {
+                        HexForgeError::invalid_input(format!(
+                            "operation '{}' does not support merge for replay",
+                            node.operation_id
+                        ))
+                    })?;
+                let views: Vec<Cow<[u8]>> = input_outputs
+                    .iter()
+                    .map(|v| Cow::Borrowed(v.as_slice()))
+                    .collect();
+                let ctx: &dyn ExecutionContext = &NullExecutionContext;
+                let view = merge
+                    .apply_merge(views, &node.params, ctx)
+                    .map_err(HexForgeError::from)?;
+                let output: Arc<Vec<u8>> = Arc::new(view.into_owned());
+                if Some(blake3::hash(output.as_slice())) != snap.output_content_hash {
                     return Err(HexForgeError::internal_for_node(
                         snap.node_id,
                         format!(
@@ -806,42 +918,35 @@ pub fn replay_snapshot(
                         ),
                     ));
                 }
-                return Ok(out);
+                return Ok(output);
             }
         }
-        false
-    };
-    let _ = is_merge;
+    }
 
-    // Корень lineage обязан быть source-root: его узел живёт в текущем графе
-    // и ссылается на источник по params.sourceHandle.
+    // Корень lineage обязан быть source-root: используем исторические params из снапшота,
+    // а не текущие graph.nodes (иначе после patch_source replay дал бы новые байты).
     let root_bytes: Arc<Vec<u8>> = {
-        let graph = state.graph.read();
-        let node = graph.nodes.get(&first.node_id).ok_or_else(|| {
-            HexForgeError::internal_for_node(
-                first.node_id,
-                format!(
-                    "cannot replay snapshot {snapshot_id}: root node {} is gone from the current graph",
-                    first.node_id
-                ),
-            )
-        })?
-        .clone();
-        drop(graph);
-
-        if !node.inputs.is_empty() {
-            return Err(HexForgeError::invalid_input(
-                "cannot replay snapshot: its root snapshot is not a source node",
-            ));
+        if first.params.get("sourceHandle").is_none() {
+            // Fallback to graph if snapshot params missing (v1 compat)
+            let graph = state.graph.read();
+            let node = graph.nodes.get(&first.node_id).cloned();
+            drop(graph);
+            if let Some(node) = node {
+                if !node.inputs.is_empty() {
+                    return Err(HexForgeError::invalid_input(
+                        "cannot replay snapshot: its root snapshot is not a source node",
+                    ));
+                }
+            }
         }
-        let handle_str = node
+        let handle_str = first
             .params
             .get("sourceHandle")
             .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 HexForgeError::invalid_parameter(
                     "sourceHandle",
-                    "root node of the lineage requires params.sourceHandle",
+                    "root snapshot requires params.sourceHandle",
                 )
             })?;
         let handle = Uuid::parse_str(handle_str).map_err(|_| {
@@ -873,18 +978,6 @@ pub fn replay_snapshot(
             params: step.params.clone(),
             inputs: vec![],
         };
-        // Multi-source merge replay not yet fully supported in this MVP (requires N parent hashes).
-        // Execution via `resolve_node` is multi-source ready; time-travel for merge remains single-source linear.
-        {
-            let graph = state.graph.read();
-            if let Some(g_node) = graph.nodes.get(&step.node_id) {
-                if g_node.inputs.len() > 1 {
-                    return Err(HexForgeError::invalid_input(
-                        "replay for multi-source merge nodes not yet supported in this MVP (use run_node for execution)",
-                    ));
-                }
-            }
-        }
         let transform = lookup_transform(&node, state)?;
 
         // Вход шага — выход предыдущего; для первого шага это корневой
@@ -930,11 +1023,14 @@ pub fn replay_snapshot(
 /// Чистый конструктор снапшота истории (FR-4.2): фиксирует операцию@версию,
 /// параметры и content-hash'и входа/выхода — этого достаточно для
 /// воспроизведения результата без хранения самих байтов.
+/// v2: для N-ary хранит все input hashes и snapshot ids.
 pub(crate) fn build_snapshot(
     node: &OperationNode,
     parent: Option<hexforge_core::SnapshotId>,
     input_hash: blake3::Hash,
     output_hash: blake3::Hash,
+    input_hashes: Option<Vec<blake3::Hash>>,
+    input_snapshot_ids: Vec<hexforge_core::SnapshotId>,
 ) -> hexforge_core::Snapshot {
     hexforge_core::Snapshot {
         id: Uuid::new_v4(),
@@ -944,6 +1040,8 @@ pub(crate) fn build_snapshot(
         operation_version: node.operation_version.clone(),
         params: node.params.clone(),
         input_content_hash: input_hash,
+        input_content_hashes: input_hashes,
+        input_snapshot_ids,
         output_content_hash: Some(output_hash),
     }
 }
@@ -957,16 +1055,28 @@ pub(crate) fn build_snapshot(
 /// воспроизводимости: повторное состояние НЕ создаёт новый узел DAG —
 /// голова истории переезжает на существующий снапшот (FR-4.2).
 /// Возвращает id актуального снапшота состояния.
+/// v2: для N-ary хранит все input hashes и snapshot ids.
 pub(crate) fn record_output(
     node: &OperationNode,
     state: &AppState,
     input_hash: blake3::Hash,
     output_hash: blake3::Hash,
+    input_hashes: Option<Vec<blake3::Hash>>,
+    input_snapshot_ids: Vec<hexforge_core::SnapshotId>,
 ) -> hexforge_core::SnapshotId {
+    // v2: для N-ary ключ — все hashes через `,`, для single — single hash (совместимо)
+    let input_hex = if let Some(hs) = &input_hashes {
+        hs.iter()
+            .map(|h| h.to_hex().to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        input_hash.to_hex().to_string()
+    };
     let key = hexforge_core::reproducibility_key(
         &node.operation_id,
         &node.operation_version,
-        &input_hash.to_hex()[..],
+        &input_hex,
         &node.params,
     );
     // ВАЖНО: результат read-guard ограничен отдельной инструкцией —
@@ -976,7 +1086,22 @@ pub(crate) fn record_output(
         state.history.write().current = Some(existing);
         return existing;
     }
-    let snapshot = build_snapshot(node, state.history.read().current, input_hash, output_hash);
+    // v2: parent for History DAG — for source, None; for unary, single input_snapshot_id; for merge, last input (keeps lineage linear, input_snapshot_ids captures N-ary)
+    let parent = if node.inputs.is_empty() {
+        None
+    } else if !input_snapshot_ids.is_empty() {
+        Some(*input_snapshot_ids.last().unwrap())
+    } else {
+        state.history.read().current
+    };
+    let snapshot = build_snapshot(
+        node,
+        parent,
+        input_hash,
+        output_hash,
+        input_hashes,
+        input_snapshot_ids,
+    );
     let id = snapshot.id;
     state.history.write().record(snapshot);
     id
@@ -1472,7 +1597,14 @@ mod tests {
         let input_hash = blake3::hash(b"input-bytes");
         let output_hash = blake3::hash(b"output-bytes");
 
-        let snap = build_snapshot(&node, Some(parent), input_hash, output_hash);
+        let snap = build_snapshot(
+            &node,
+            Some(parent),
+            input_hash,
+            output_hash,
+            None,
+            Vec::new(),
+        );
 
         assert_ne!(snap.id, parent, "snapshot id must be freshly minted");
         assert_eq!(snap.parent, Some(parent));
