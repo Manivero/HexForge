@@ -41,12 +41,10 @@ impl Transform for UnicodeNormalize {
         params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let form = params.get("form").and_then(|v| v.as_str()).ok_or_else(|| {
-            TransformError::InvalidParameter {
-                field: "form".into(),
-                reason: "string parameter 'form' (nfc|nfd|nfkc|nfkd) is required".into(),
-            }
-        })?;
+        // Schema объявляет default="nfc", но движок дефолты не инжектит
+        // (дефолты — подсказка UI-формы); по конвенции кодовой базы
+        // (напр. base64 alphabet → STANDARD) отсутствие = дефолт.
+        let form = params.get("form").and_then(|v| v.as_str()).unwrap_or("nfc");
         let s = String::from_utf8_lossy(input.as_ref());
         let out = match form {
             "nfc" => s.nfc().collect::<String>(),
@@ -110,5 +108,20 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidParameter { .. }));
+    }
+
+    #[test]
+    fn missing_form_uses_schema_default_nfc() {
+        // Schema: required + default="nfc"; движок дефолты не инжектит,
+        // поэтому отсутствие обязано вести себя как nfc, а не ошибкой.
+        let ctx = NullExecutionContext;
+        let out = UnicodeNormalize
+            .apply(
+                Cow::Borrowed("e\u{0301}".as_bytes()),
+                &serde_json::json!({}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(out.as_ref(), "é".as_bytes());
     }
 }
