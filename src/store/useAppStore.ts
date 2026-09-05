@@ -19,6 +19,10 @@ import {
   cancelNode as ipcCancelNode,
   exportRecipe as ipcExportRecipe,
   importRecipe as ipcImportRecipe,
+  listPlugins as ipcListPlugins,
+  installPlugin as ipcInstallPlugin,
+  grantCapability as ipcGrantCapability,
+  revokeCapability as ipcRevokeCapability,
   decodeBase64Chunk,
 } from "@/lib/ipc";
 import { HexForgeCommandError } from "@/lib/ipc-contract";
@@ -26,11 +30,15 @@ import type {
   NodeId,
   OperationDescriptor,
   OperationNodeDto,
+  PluginCapability,
+  PluginId,
+  PluginManifestDto,
   RunNodeResponse,
   SnapshotDto,
   SnapshotId,
   SourceHandle,
 } from "@/lib/ipc-contract";
+import { applyGrantedCapability, applyRevokedCapability } from "@/lib/plugins";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 import { hexPairsToBytes } from "@/lib/bytes";
 import { findRootId } from "@/lib/graphWalk";
@@ -142,7 +150,25 @@ interface DataSlice {
   importRecipe: (sourcePath: string) => Promise<boolean>;
 }
 
-export type AppStore = UiSlice & PaletteSlice & OperationsSlice & GraphSlice & DataSlice;
+/** Срез обнаруженных плагинов (FR-6): тонкая обёртка над plugin-командами.
+ * Никакой валидации подписей/ABI здесь нет — бэкенд отдаёт готовый
+ * PluginManifestDto; стор лишь хранит список и отражает подтверждённые
+ * бэкендом grant/revoke. Гранты сессионные: персистентность бэкенд не
+ * заявляет (см. VALID_CAPABILITIES в commands.rs), перезагрузка списка
+ * возвращает серверную истину. */
+interface PluginsSlice {
+  plugins: PluginManifestDto[];
+  pluginsLoading: boolean;
+  pluginsError: string | null;
+  loadPlugins: () => Promise<void>;
+  /** Install из пары путей (wasm + manifest; .sig/.pub рядом читает бэкенд).
+   * Успех также обновляет палитру операций — install регистрирует Transform. */
+  installPluginFromPaths: (wasmPath: string, manifestPath: string) => Promise<boolean>;
+  grantPluginCapability: (pluginId: PluginId, capability: PluginCapability) => Promise<boolean>;
+  revokePluginCapability: (pluginId: PluginId, capability: PluginCapability) => Promise<boolean>;
+}
+
+export type AppStore = UiSlice & PaletteSlice & OperationsSlice & GraphSlice & DataSlice & PluginsSlice;
 
 function newNodeId(): string {
   return crypto.randomUUID();
@@ -618,6 +644,60 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return true;
     } catch (err) {
       set({ runError: formatIpcError(err) });
+      return false;
+    }
+  },
+
+  // ---- plugins (FR-6) ----
+  plugins: [],
+  pluginsLoading: false,
+  pluginsError: null,
+  loadPlugins: async () => {
+    set({ pluginsLoading: true, pluginsError: null });
+    try {
+      const plugins = await ipcListPlugins();
+      set({ plugins, pluginsLoading: false });
+    } catch (err) {
+      set({ pluginsLoading: false, pluginsError: formatIpcError(err) });
+    }
+  },
+  installPluginFromPaths: async (wasmPath, manifestPath) => {
+    set({ pluginsLoading: true, pluginsError: null });
+    try {
+      const dto = await ipcInstallPlugin({ wasmPath, manifestPath });
+      set((s) => {
+        const rest = s.plugins.filter((p) => p.id !== dto.id);
+        return { plugins: [...rest, dto], pluginsLoading: false };
+      });
+      // Install регистрирует Transform в реестре — палитра должна его увидеть.
+      await get().loadOperations();
+      return true;
+    } catch (err) {
+      set({ pluginsLoading: false, pluginsError: formatIpcError(err) });
+      return false;
+    }
+  },
+  grantPluginCapability: async (pluginId, capability) => {
+    try {
+      const ok = await ipcGrantCapability({ pluginId, capability });
+      if (ok) {
+        set((s) => ({ plugins: applyGrantedCapability(s.plugins, pluginId, capability) }));
+      }
+      return ok;
+    } catch (err) {
+      set({ pluginsError: formatIpcError(err) });
+      return false;
+    }
+  },
+  revokePluginCapability: async (pluginId, capability) => {
+    try {
+      const ok = await ipcRevokeCapability({ pluginId, capability });
+      if (ok) {
+        set((s) => ({ plugins: applyRevokedCapability(s.plugins, pluginId, capability) }));
+      }
+      return ok;
+    } catch (err) {
+      set({ pluginsError: formatIpcError(err) });
       return false;
     }
   },

@@ -4,6 +4,7 @@ import { GraphCanvas } from "@/components/GraphCanvas/GraphCanvas";
 import { HistoryPanel } from "@/components/HistoryPanel/HistoryPanel";
 import { InputPanel } from "@/components/InputPanel/InputPanel";
 import { InspectorPanel } from "@/components/InspectorPanel/InspectorPanel";
+import { PluginPanel } from "@/components/PluginPanel/PluginPanel";
 import { PreviewDock } from "@/components/PreviewDock/PreviewDock";
 import { useAppStore } from "@/store/useAppStore";
 import { t } from "@/lib/i18n";
@@ -175,6 +176,7 @@ export function App() {
             <InputPanel />
             <HistoryPanel />
           </div>
+          <PluginPanel />
           <PreviewDock />
 
           {(runError || operationsError) && (

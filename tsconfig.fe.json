@@ -17,6 +17,7 @@
     "src/lib/i18n.ts",
     "src/lib/ipc-contract.ts",
     "src/lib/ipc.ts",
+    "src/lib/plugins.ts",
     "src/lib/utils.ts"
   ]
 }
