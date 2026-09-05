@@ -308,6 +308,14 @@ impl PluginRuntime {
         self.execute_core_module(instance, input)
     }
 
+    /// Fuel-исчерпание по первопричине wasmtime-ошибки.
+    /// `Trap::OutOfFuel` («all fuel consumed by WebAssembly») лежит в `root_cause()`,
+    /// а top-level Display показывает лишь WasmBacktrace-контекст — поэтому
+    /// проверка подстроки по верхнему сообщению fuel-перерасход не ловит.
+    fn is_fuel_exhaustion(err: &wasmtime::Error) -> bool {
+        err.root_cause().to_string().contains("fuel") || format!("{err:?}").contains("fuel")
+    }
+
     /// Component Model execution: calls `transform.apply(input, params)` via WIT.
     fn execute_component(
         &self,
@@ -340,8 +348,7 @@ impl PluginRuntime {
         // Real WIT execution via component `transform.apply` (list<u8>, string) -> result<list<u8>, string>
         // We use the raw component instance API to avoid tight coupling to bindgen! generated names.
         let instance = linker.instantiate(&mut store, &component).map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("fuel") {
+            if Self::is_fuel_exhaustion(&e) {
                 anyhow!(PluginError::WasmtimeError(
                     "fuel exhausted during instantiation".into(),
                 ))
@@ -362,8 +369,7 @@ impl PluginRuntime {
             })?;
         let (result,): (Result<Vec<u8>, String>,) =
             func.call(&mut store, (input, params_json)).map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("fuel") {
+                if Self::is_fuel_exhaustion(&e) {
                     anyhow!(PluginError::WasmtimeError(
                         "fuel exhausted in transform.apply".into(),
                     ))
@@ -399,8 +405,7 @@ impl PluginRuntime {
         // No WASI imports — sandbox. If caps granted, we could add WASI here in future.
 
         let wasm_instance = linker.instantiate(&mut store, &module).map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("fuel") {
+            if Self::is_fuel_exhaustion(&e) {
                 anyhow!(PluginError::WasmtimeError(
                     "fuel exhausted during instantiation (possible infinite loop)".into()
                 ))
@@ -460,8 +465,7 @@ impl PluginRuntime {
                 })?;
                 // Call transform(input_ptr=0, input_len)
                 let out_len = func.call(&mut store, (0, input_len)).map_err(|e| {
-                    let msg = e.to_string();
-                    if msg.contains("fuel") {
+                    if Self::is_fuel_exhaustion(&e) {
                         anyhow!(PluginError::WasmtimeError(
                             "fuel exhausted in transform (NFR-9)".into()
                         ))
@@ -487,8 +491,7 @@ impl PluginRuntime {
             if let Ok(func) = wasm_instance.get_typed_func::<(), ()>(&mut store, export_name) {
                 let res = func.call(&mut store, ());
                 if let Err(e) = res {
-                    let msg = e.to_string();
-                    if msg.contains("fuel") {
+                    if Self::is_fuel_exhaustion(&e) {
                         return Err(anyhow!(PluginError::WasmtimeError(
                             "fuel exhausted: infinite loop or heavy compute (NFR-9)".into()
                         )));
@@ -777,7 +780,12 @@ impl Transform for PluginTransform {
             .execute_with_params(&self.instance, input.as_ref(), &params_str)
             .map_err(|e| {
                 let msg = e.to_string();
-                if msg.contains("fuel") {
+                // Внутренние слои уже называют fuel exhaustion явно, но сырой
+                // wasmtime::Error может быть завёрнут глубже — проверяем и его.
+                let raw_fuel = e
+                    .downcast_ref::<wasmtime::Error>()
+                    .is_some_and(PluginRuntime::is_fuel_exhaustion);
+                if raw_fuel || msg.contains("fuel") {
                     TransformError::Internal("fuel exhausted (NFR-9)".into())
                 } else if msg.contains("capability") || msg.contains("CapabilityDenied") {
                     TransformError::Internal(format!("capability denied: {msg}"))
@@ -897,8 +905,7 @@ impl PluginRuntime {
                 let out_len = func
                     .call(&mut store, (0, input_len, input_len, params_len))
                     .map_err(|e| {
-                        let msg = e.to_string();
-                        if msg.contains("fuel") {
+                        if Self::is_fuel_exhaustion(&e) {
                             anyhow!(PluginError::WasmtimeError(
                                 "fuel exhausted in transform".into()
                             ))
@@ -937,9 +944,15 @@ impl PluginRuntime {
                     )))
                 })?;
                 let out_len = func.call(&mut store, (0, input_len)).map_err(|e| {
-                    anyhow!(PluginError::WasmtimeError(format!(
-                        "wasm trap in 'transform': {e}"
-                    )))
+                    if Self::is_fuel_exhaustion(&e) {
+                        anyhow!(PluginError::WasmtimeError(
+                            "fuel exhausted in transform".into(),
+                        ))
+                    } else {
+                        anyhow!(PluginError::WasmtimeError(format!(
+                            "wasm trap in 'transform': {e}"
+                        )))
+                    }
                 })?;
                 let out_len = checked_output_length(out_len)?;
                 let mut out = vec![0u8; out_len];
@@ -956,8 +969,7 @@ impl PluginRuntime {
         for export_name in ["run", "_start"] {
             if let Ok(func) = wasm_instance.get_typed_func::<(), ()>(&mut store, export_name) {
                 func.call(&mut store, ()).map_err(|e| {
-                    let msg = e.to_string();
-                    if msg.contains("fuel") {
+                    if Self::is_fuel_exhaustion(&e) {
                         anyhow!(PluginError::WasmtimeError("fuel exhausted".into()))
                     } else {
                         anyhow!(PluginError::WasmtimeError(format!(
@@ -1235,9 +1247,11 @@ mod tests {
         };
         let err = runtime.execute(&instance, b"input").unwrap_err();
         let msg = err.to_string();
+        // Диагностика обязана называть fuel exhaustion явно: wasmtime прячет
+        // Trap::OutOfFuel в root_cause, top-level Display показывает лишь бэктрейс.
         assert!(
-            msg.contains("fuel") || msg.contains("Fuel") || msg.contains("wasmtime"),
-            "expected fuel error, got {msg}"
+            msg.contains("fuel exhausted"),
+            "expected explicit fuel-exhaustion diagnostic, got {msg}"
         );
         let _ = std::fs::remove_file(&wasm_path);
     }

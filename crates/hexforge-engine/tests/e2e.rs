@@ -322,6 +322,136 @@ fn e2e_plugin_host_via_transform() {
     let _ = std::fs::remove_file(&wasm_path);
 }
 
+fn e2e_plugin_fixture(
+    wat_str: &str,
+    id: &str,
+    fuel: Option<u64>,
+) -> (
+    std::path::PathBuf,
+    std::sync::Arc<hexforge_plugin_host::PluginRuntime>,
+    hexforge_plugin_host::PluginInstance,
+) {
+    let wasm_bytes = wat::parse_str(wat_str).unwrap();
+    let wasm_path = std::env::temp_dir().join(format!(
+        "hexforge-e2e-plugin-{}-{}.wasm",
+        id,
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&wasm_path, &wasm_bytes).unwrap();
+    let runtime = std::sync::Arc::new(hexforge_plugin_host::PluginRuntime::new(fuel).unwrap());
+    let instance = hexforge_plugin_host::PluginInstance {
+        manifest: hexforge_plugin_host::PluginManifest {
+            id: id.into(),
+            name: id.into(),
+            version: "1.0.0".into(),
+            author: "Test".into(),
+            requested_capabilities: vec![],
+            granted_capabilities: vec![],
+        },
+        wasm_path: wasm_path.to_string_lossy().into_owned(),
+        pubkey_hex: String::new(),
+        signature_hex: String::new(),
+    };
+    (wasm_path, runtime, instance)
+}
+
+fn e2e_register_plugin(
+    runtime: std::sync::Arc<hexforge_plugin_host::PluginRuntime>,
+    instance: hexforge_plugin_host::PluginInstance,
+) -> (
+    &'static dyn hexforge_core::Transform,
+    hexforge_core::TransformRegistry,
+) {
+    let transform = runtime.as_transform(instance).unwrap();
+    let leaked: Box<dyn hexforge_core::Transform> = Box::new(transform);
+    let static_ref: &'static dyn hexforge_core::Transform = Box::leak(leaked);
+    let mut reg = hexforge_ops::build_registry();
+    reg.register(static_ref);
+    (static_ref, reg)
+}
+
+#[test]
+fn e2e_plugin_fuel_exhaustion_through_scheduler() {
+    // WIT-путь под давлением ресурсов: бесконечный цикл с крошечным fuel
+    // обязан вернуться быстрой ошибкой через весь стек scheduler → registry →
+    // WASM, а не зависнуть и не уронить хост.
+    let wat_loop = r#"(module (func (export "run") (loop (br 0))))"#;
+    let (wasm_path, runtime, instance) = e2e_plugin_fixture(wat_loop, "e2e.looper", Some(1000));
+    let (plugin, reg) = e2e_register_plugin(runtime, instance);
+    let state = AppState::new(reg);
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"doomed".to_vec()));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: plugin.id().into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let err = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap_err();
+    assert_eq!(err.kind, hexforge_engine::HexForgeErrorKind::Internal);
+    assert!(
+        err.message.contains("fuel exhausted"),
+        "expected fuel error, got: {}",
+        err.message
+    );
+    let _ = std::fs::remove_file(&wasm_path);
+}
+
+#[test]
+fn e2e_plugin_large_input_through_scheduler() {
+    // Плагин на большом входе: 8 МиБ через WASM-память (grow из 1 страницы 64 КиБ),
+    // побайтово точный верхний регистр, лимитер памяти не срабатывает.
+    // 10 МиБ — жёсткий кап выхода плагина (защита хоста от OOM через out_len),
+    // поэтому вход держим ниже капа: его наличие тоже проверяется этим тестом.
+    let wat_upper = r#"
+        (module
+            (memory (export "memory") 1)
+            (func (export "transform") (param i32 i32) (result i32)
+                (local $i i32)
+                (local $c i32)
+                (local.set $i (i32.const 0))
+                (block $exit
+                    (loop $loop
+                        (br_if $exit (i32.ge_u (local.get $i) (local.get 1)))
+                        (local.set $c (i32.load8_u (i32.add (local.get 0) (local.get $i))))
+                        (if (i32.and (i32.ge_u (local.get $c) (i32.const 97)) (i32.le_u (local.get $c) (i32.const 122)))
+                            (then (i32.store8 (i32.add (local.get 0) (local.get $i)) (i32.sub (local.get $c) (i32.const 32)))))
+                        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+                        (br $loop)
+                    )
+                )
+                (local.get 1)
+            )
+        )
+    "#;
+    // 8 МиБ × ~12 инструкций/байт >> дефолтных 10M fuel — даём с запасом.
+    let (wasm_path, runtime, instance) =
+        e2e_plugin_fixture(wat_upper, "e2e.bigupper", Some(1_000_000_000));
+    let (plugin, reg) = e2e_register_plugin(runtime, instance);
+    let state = AppState::new(reg);
+    let len = 8 * E2E_MB;
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'a'; len]));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: plugin.id().into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), len);
+    assert!(out.iter().all(|&b| b == b'A'));
+    let _ = std::fs::remove_file(&wasm_path);
+}
+
 #[test]
 fn e2e_bench_gate_execute_chain_64k() {
     // NFR-1 gate: 64 KiB rot13+base64 chain via execute_chain should complete in <100ms (lenient, catches major regression)
