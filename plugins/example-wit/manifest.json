@@ -1,0 +1,8 @@
+{
+  "id": "example.wit-uppercase",
+  "name": "Example WIT Uppercase",
+  "version": "1.0.0",
+  "author": "HexForge Example",
+  "requested_capabilities": [],
+  "granted_capabilities": []
+}

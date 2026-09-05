@@ -10,10 +10,11 @@
 //! - Integration tests with real WASM plugins (WAT components)
 
 use anyhow::{anyhow, Context, Result};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hexforge_core::{
     ByteView, ExecutionContext, MemoryCost, Transform, TransformCapabilities, TransformError,
 };
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::path::Path;
@@ -23,6 +24,15 @@ use wasmtime::{Config, Engine, ResourceLimiter, Store};
 /// Keep a faulty or hostile core-WASM plugin from forcing a large host-side
 /// allocation before its output can be read from linear memory.
 const MAX_PLUGIN_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
+/// WIT contract identity plug-in developers target.
+/// Must stay in sync with `wit/plugin.wit` (`package …` line) and the
+/// `hexforge:plugin/transform/*` export names used in `try_get_wit_metadata`.
+/// Bump on any breaking WIT change; host rejects components built for an
+/// unknown package with an explicit error instead of a bare trap.
+pub const WIT_PACKAGE: &str = "hexforge:plugin";
+/// Supported WIT interface version (semver `major.minor`).
+pub const WIT_VERSION: &str = "0.1.0";
 
 // WIT Component Model bindings — host calls plugin's exported `transform` interface.
 // The WIT file is at `wit/plugin.wit` (world `hexforge-plugin`).
@@ -52,6 +62,8 @@ pub enum PluginError {
     InvalidPublicKey(String),
     #[error("manifest parse failed: {0}")]
     ManifestParse(String),
+    #[error("invalid manifest: {0}")]
+    InvalidManifest(String),
     #[error("wasmtime error: {0}")]
     WasmtimeError(String),
     #[error("capability denied: {0}")]
@@ -235,6 +247,9 @@ impl PluginRuntime {
         // 2. Parse manifest
         let manifest: PluginManifest =
             serde_json::from_slice(manifest_bytes).context("Failed to parse manifest JSON")?;
+
+        // 2b. Validate manifest semantics (developer-friendly errors before touching WASM)
+        validate_manifest(&manifest).map_err(|e| anyhow!(e))?;
 
         // 3. Validate WASM module exists and is loadable (fuel/memory limits enforced at execute, but early validation here)
         if !wasm_path.exists() {
@@ -624,6 +639,17 @@ impl PluginTransform {
         })
     }
 
+    /// Friendly error for a component that misses one `transform` export:
+    /// names the expected WIT contract so developers see a version mismatch
+    /// instead of a bare lookup failure.
+    fn wit_export_error(export: &str) -> anyhow::Error {
+        anyhow!(
+            "component is missing export '{export}' (unsupported WIT interface: \
+             expected world 'hexforge-plugin' from {WIT_PACKAGE}@{WIT_VERSION} \
+             exporting the full transform interface)"
+        )
+    }
+
     fn try_get_wit_metadata(
         runtime: &PluginRuntime,
         instance: &PluginInstance,
@@ -641,7 +667,14 @@ impl PluginTransform {
         let component =
             match wasmtime::component::Component::from_binary(&runtime.engine, &wasm_bytes) {
                 Ok(c) => c,
-                Err(_) => return Err(anyhow!("not a component")),
+                // NOTE: keep the "not a component" prefix — `execute`/`execute_with_params`
+                // match on it to select the legacy core-module path.
+                Err(_) => {
+                    return Err(anyhow!(
+                        "not a component: file does not export the WIT world 'hexforge-plugin' \
+                         (expected {WIT_PACKAGE}@{WIT_VERSION}); host falls back to manifest + core-module ABI"
+                    ))
+                }
             };
         let mut store = Store::new(&runtime.engine, HostState::new(runtime.max_memory_bytes));
         store.limiter(|s| &mut s.limiter);
@@ -657,13 +690,13 @@ impl PluginTransform {
         // Try to call WIT getters via typed funcs; if any fail, fallback to manifest
         let get_id = inst
             .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-id")
-            .map_err(|_| anyhow!("no get-id"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-id"))?;
         let (id,): (String,) = get_id
             .call(&mut store, ())
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-id trap: {e}"))))?;
         let get_version = inst
             .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-version")
-            .map_err(|_| anyhow!("no get-version"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-version"))?;
         let (version,): (String,) = get_version
             .call(&mut store, ())
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-version trap: {e}"))))?;
@@ -672,7 +705,7 @@ impl PluginTransform {
                 &mut store,
                 "hexforge:plugin/transform/get-display-name",
             )
-            .map_err(|_| anyhow!("no get-display-name"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-display-name"))?;
         let (display_name,): (String,) = get_display.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-display-name trap: {e}"
@@ -680,7 +713,7 @@ impl PluginTransform {
         })?;
         let get_category = inst
             .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-category")
-            .map_err(|_| anyhow!("no get-category"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-category"))?;
         let (category,): (String,) = get_category.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-category trap: {e}"
@@ -691,7 +724,7 @@ impl PluginTransform {
                 &mut store,
                 "hexforge:plugin/transform/get-params-schema",
             )
-            .map_err(|_| anyhow!("no get-params-schema"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-params-schema"))?;
         let (schema_str,): (String,) = get_schema.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-params-schema trap: {e}"
@@ -704,7 +737,7 @@ impl PluginTransform {
                 &mut store,
                 "hexforge:plugin/transform/get-capabilities",
             )
-            .map_err(|_| anyhow!("no get-capabilities"))?;
+            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-capabilities"))?;
         let ((deterministic, streamable, memory_cost_str),): ((bool, bool, String),) =
             get_caps.call(&mut store, ()).map_err(|e| {
                 anyhow!(PluginError::WasmtimeError(format!(
@@ -1008,6 +1041,96 @@ pub fn verify_signature(
     Ok(vk.verify(manifest_bytes, &sig).is_ok())
 }
 
+/// Developer SDK: generates a fresh Ed25519 keypair for plugin signing.
+///
+/// Returns `(pubkey_hex, signing_key_hex)`. The signing key signs the raw
+/// `manifest.json` bytes via [`sign_manifest`]; the pubkey travels with the
+/// install request (trust-on-first-use). Keep the signing key secret.
+pub fn generate_keypair() -> (String, String) {
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    (
+        hex::encode(verifying_key.to_bytes()),
+        hex::encode(signing_key.to_bytes()),
+    )
+}
+
+/// Developer SDK: signs raw `manifest.json` bytes with the hex-encoded
+/// Ed25519 signing key from [`generate_keypair`].
+///
+/// Returns the lowercase-hex 64-byte signature for the install request.
+/// Sign EXACTLY the bytes you ship: any re-formatting of `manifest.json`
+/// afterwards invalidates the signature.
+pub fn sign_manifest(manifest_bytes: &[u8], signing_key_hex: &str) -> Result<String, PluginError> {
+    let key_bytes = hex::decode(signing_key_hex.trim())
+        .map_err(|e| PluginError::InvalidSignature(format!("signing key is not hex: {e}")))?;
+    let key_arr: [u8; 32] = key_bytes
+        .try_into()
+        .map_err(|_| PluginError::InvalidSignature("signing key must be 32 bytes".into()))?;
+    let signing_key = SigningKey::from_bytes(&key_arr);
+    Ok(hex::encode(signing_key.sign(manifest_bytes).to_bytes()))
+}
+
+/// Developer SDK: validates manifest semantics beyond JSON shape.
+///
+/// Checks presence, `id` charset (`[a-z0-9._-]`, non-empty), strict
+/// `major.minor.patch` numeric version, and non-blank capability entries.
+/// Called by [`PluginRuntime::install`]; call it up-front for a fast
+/// developer-friendly failure before signing or shipping.
+pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
+    let bad = |field: &str, what: &str| {
+        PluginError::InvalidManifest(format!(
+            "field '{field}' {what} (id={:?}, version={:?})",
+            manifest.id, manifest.version
+        ))
+    };
+    if manifest.id.trim().is_empty() {
+        return Err(bad("id", "must not be empty, e.g. \"acme.uppercase\""));
+    }
+    if manifest.id.len() > 128 {
+        return Err(bad("id", "must be at most 128 bytes"));
+    }
+    if !manifest
+        .id
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    {
+        return Err(bad("id", "must match [a-z0-9._-], e.g. \"acme.uppercase\""));
+    }
+    if manifest.name.trim().is_empty() {
+        return Err(bad("name", "must not be empty"));
+    }
+    if manifest.author.trim().is_empty() {
+        return Err(bad("author", "must not be empty"));
+    }
+    let version_ok = {
+        let parts: Vec<&str> = manifest.version.split('.').collect();
+        parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    if !version_ok {
+        return Err(bad(
+            "version",
+            "must be numeric \"major.minor.patch\", e.g. \"1.0.0\"",
+        ));
+    }
+    for cap in manifest
+        .requested_capabilities
+        .iter()
+        .chain(manifest.granted_capabilities.iter())
+    {
+        if cap.trim().is_empty() {
+            return Err(bad(
+                "requested_capabilities/granted_capabilities",
+                "capability entries must not be blank",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Scans `plugins_dir` for `*.wasm` + `*.json` pairs, verifies signatures, and returns valid instances.
 /// For MVP, looks in `./plugins` or `plugins_dir` if provided; if dir missing, returns empty.
 pub fn list_plugins_in_dir(plugins_dir: &Path) -> Vec<PluginInstance> {
@@ -1089,6 +1212,73 @@ mod tests {
         assert!(matches!(
             err,
             PluginError::InvalidSignature(_) | PluginError::InvalidPublicKey(_)
+        ));
+    }
+
+    fn sdk_test_manifest() -> PluginManifest {
+        PluginManifest {
+            id: "acme.uppercase".into(),
+            name: "Acme Uppercase".into(),
+            version: "1.0.0".into(),
+            author: "Acme".into(),
+            requested_capabilities: vec![],
+            granted_capabilities: vec![],
+        }
+    }
+
+    #[test]
+    fn sdk_keygen_sign_verify_roundtrip() {
+        let (pubkey_hex, signing_key_hex) = generate_keypair();
+        assert_eq!(pubkey_hex.len(), 64);
+        assert_eq!(signing_key_hex.len(), 64);
+        let manifest_bytes = serde_json::to_vec(&sdk_test_manifest()).unwrap();
+        let sig_hex = sign_manifest(&manifest_bytes, &signing_key_hex).unwrap();
+        assert_eq!(sig_hex.len(), 128);
+        assert!(verify_signature(&manifest_bytes, &sig_hex, &pubkey_hex).unwrap());
+        // Re-formatted bytes break the signature (sign exactly what you ship)
+        let mut pretty = serde_json::to_string_pretty(&sdk_test_manifest()).unwrap();
+        pretty.push('\n');
+        assert!(!verify_signature(pretty.as_bytes(), &sig_hex, &pubkey_hex).unwrap());
+    }
+
+    #[test]
+    fn sdk_sign_rejects_malformed_key() {
+        let err = sign_manifest(b"{}", "zz").unwrap_err();
+        assert!(matches!(err, PluginError::InvalidSignature(_)));
+        let err = sign_manifest(b"{}", "00").unwrap_err();
+        assert!(matches!(err, PluginError::InvalidSignature(_)));
+    }
+
+    #[test]
+    fn sdk_validate_manifest_accepts_good() {
+        validate_manifest(&sdk_test_manifest()).unwrap();
+    }
+
+    #[test]
+    fn sdk_validate_manifest_rejects_bad() {
+        let mut m = sdk_test_manifest();
+        m.id = String::new();
+        assert!(matches!(
+            validate_manifest(&m).unwrap_err(),
+            PluginError::InvalidManifest(_)
+        ));
+        m = sdk_test_manifest();
+        m.id = "ACME/uppercase!".into();
+        let err = validate_manifest(&m).unwrap_err();
+        assert!(err.to_string().contains("[a-z0-9._-]"), "{err}");
+        for bad_version in ["1.0", "v1.0.0", "1.0.x", "1.0.0-beta", ""] {
+            m = sdk_test_manifest();
+            m.version = bad_version.into();
+            assert!(matches!(
+                validate_manifest(&m).unwrap_err(),
+                PluginError::InvalidManifest(_)
+            ));
+        }
+        m = sdk_test_manifest();
+        m.requested_capabilities = vec!["network".into(), "  ".into()];
+        assert!(matches!(
+            validate_manifest(&m).unwrap_err(),
+            PluginError::InvalidManifest(_)
         ));
     }
 

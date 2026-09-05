@@ -1,0 +1,33 @@
+/// Copy of `crates/hexforge-plugin-host/wit/plugin.wit` at WIT hexforge:plugin@0.1.0.
+/// Keep in sync with the host: the host names this exact package/version in
+/// `WIT_PACKAGE`/`WIT_VERSION` and reports a mismatch as an explicit
+/// "unsupported WIT interface" error instead of a bare trap.
+package hexforge:plugin@0.1.0;
+
+/// Transform interface — WIT isomorphic to hexforge_core::Transform.
+/// Plugin WASM component must export this world.
+interface transform {
+    record capabilities {
+        deterministic: bool,
+        streamable: bool,
+        /// "constant" | "per-chunk" | "full-buffer"
+        memory-cost: string,
+    }
+
+    /// Stable operation id, e.g. "custom.uppercase" — must be unique in registry.
+    get-id: func() -> string;
+    get-version: func() -> string;
+    get-display-name: func() -> string;
+    get-category: func() -> string;
+    /// JSON Schema (stringified JSON) for params form.
+    get-params-schema: func() -> string;
+    get-capabilities: func() -> capabilities;
+    /// Pure transform: input bytes + params JSON -> output bytes or error string.
+    /// Must be deterministic if capabilities.deterministic == true.
+    /// Host enforces fuel and memory limits, traps are isolated.
+    apply: func(input: list<u8>, params: string) -> result<list<u8>, string>;
+}
+
+world hexforge-plugin {
+    export transform;
+}
