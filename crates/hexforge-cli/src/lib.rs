@@ -215,3 +215,42 @@ pub fn validate_recipe(recipe_path: &str) -> Result<String, String> {
         registry.len()
     ))
 }
+
+/// Plugin SDK: генерация ключевой пары разработчика.
+///
+/// Возвращает `(pubkey_hex, signing_key_hex)`. Публичный ключ прикладывается
+/// к install-запросу (TOFU), секретный подписывает `manifest.json`.
+pub fn plugin_keygen() -> (String, String) {
+    hexforge_plugin_host::generate_keypair()
+}
+
+/// Plugin SDK: подпись байтов `manifest.json`.
+///
+/// Возвращает hex-подпись для install-запроса. Подписываются ровно те байты,
+/// что поедут на установку: любое переформатирование после подписи ломает её.
+pub fn plugin_sign_manifest(manifest_path: &str, signing_key_hex: &str) -> Result<String, String> {
+    validate_cli_path(manifest_path, "manifest")?;
+    if signing_key_hex.trim().is_empty() {
+        return Err("signing key must not be empty (see `plugin keygen`)".into());
+    }
+    let bytes = std::fs::read(manifest_path)
+        .map_err(|e| format!("cannot read manifest '{manifest_path}': {e}"))?;
+    hexforge_plugin_host::sign_manifest(&bytes, signing_key_hex)
+        .map_err(|e| format!("cannot sign manifest '{manifest_path}': {e}"))
+}
+
+/// Plugin SDK: проверка `manifest.json` (JSON-форма + семантика полей).
+/// Для CI: падает до подписи/установки с понятной ошибкой.
+pub fn plugin_validate_manifest(manifest_path: &str) -> Result<String, String> {
+    validate_cli_path(manifest_path, "manifest")?;
+    let bytes = std::fs::read(manifest_path)
+        .map_err(|e| format!("cannot read manifest '{manifest_path}': {e}"))?;
+    let manifest: hexforge_plugin_host::PluginManifest = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("'{manifest_path}' is not a valid manifest file: {e}"))?;
+    hexforge_plugin_host::validate_manifest(&manifest)
+        .map_err(|e| format!("'{manifest_path}': {e}"))?;
+    Ok(format!(
+        "manifest valid: id={} version={}",
+        manifest.id, manifest.version
+    ))
+}

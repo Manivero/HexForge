@@ -61,9 +61,74 @@ fn main() {
                 }
             }
         }
+        [cmd, sub, rest @ ..] if cmd == "plugin" => match sub.as_str() {
+            "keygen" => {
+                if !rest.is_empty() {
+                    eprintln!("error: `plugin keygen` takes no arguments");
+                    std::process::exit(2);
+                }
+                let (pubkey, signing_key) = hexforge_cli::plugin_keygen();
+                println!("pubkey={pubkey}\nsigning_key={signing_key}");
+                eprintln!("warning: keep signing_key secret; it signs your manifest.json");
+            }
+            "sign" => {
+                // plugin sign <manifest.json> --key <signing_key_hex>
+                let mut manifest: Option<&str> = None;
+                let mut key: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--key" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: --key requires a hex argument");
+                                std::process::exit(2);
+                            }
+                            key = Some(&rest[i + 1]);
+                            i += 2;
+                        }
+                        other => {
+                            if manifest.is_some() {
+                                eprintln!("error: unexpected argument '{other}'");
+                                std::process::exit(2);
+                            }
+                            manifest = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let (Some(manifest), Some(key)) = (manifest, key) else {
+                    eprintln!("error: usage: hexforge-cli plugin sign <manifest.json> --key <hex>");
+                    std::process::exit(2);
+                };
+                match hexforge_cli::plugin_sign_manifest(manifest, key) {
+                    Ok(sig) => println!("signature={sig}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "validate" => {
+                if rest.len() != 1 {
+                    eprintln!("error: usage: hexforge-cli plugin validate <manifest.json>");
+                    std::process::exit(2);
+                }
+                match hexforge_cli::plugin_validate_manifest(&rest[0]) {
+                    Ok(msg) => println!("OK: {msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            other => {
+                eprintln!("error: unknown plugin subcommand '{other}' (keygen|sign|validate)");
+                std::process::exit(2);
+            }
+        },
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>"
             );
             std::process::exit(2);
         }
