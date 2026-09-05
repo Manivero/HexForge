@@ -67,14 +67,20 @@ impl<'a> Reader<'a> {
     }
 
     fn read_bytes(&mut self, len: usize) -> Result<&'a [u8], String> {
-        if self.pos + len > self.data.len() {
+        // checked_add: длина из varint может быть вплоть до u64::MAX —
+        // обычное сложение паниковало бы в debug на crafted-входе.
+        let end = self
+            .pos
+            .checked_add(len)
+            .ok_or_else(|| format!("field length {len} overflows buffer at byte {}", self.pos))?;
+        if end > self.data.len() {
             return Err(format!(
                 "truncated field at byte {}: need {len} bytes",
                 self.pos
             ));
         }
-        let slice = &self.data[self.pos..self.pos + len];
-        self.pos += len;
+        let slice = &self.data[self.pos..end];
+        self.pos = end;
         Ok(slice)
     }
 }
@@ -352,6 +358,20 @@ mod tests {
         let mut input = encode_varint((1 << 3) | 2);
         input.extend(encode_varint(100));
         input.extend_from_slice(b"only few");
+
+        let err = ProtobufDecodeRaw
+            .apply(Cow::Borrowed(&input), &json!({}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn huge_length_rejected_without_panic() {
+        // Length-delimited поле с длиной u64::MAX: раньше pos+len переполнял
+        // usize и паниковал в debug; теперь аккуратный InvalidInput.
+        let ctx = NullExecutionContext;
+        let mut input = encode_varint((1 << 3) | 2);
+        input.extend(encode_varint(u64::MAX));
 
         let err = ProtobufDecodeRaw
             .apply(Cow::Borrowed(&input), &json!({}), &ctx)
