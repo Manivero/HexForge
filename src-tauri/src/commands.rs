@@ -919,10 +919,12 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
     hexforge_plugin_host::list_plugins()
         .into_iter()
         .map(|inst| {
+            // Verify over the ORIGINAL manifest file bytes: re-serializing the
+            // parsed manifest would change field order/whitespace and break the
+            // signature even for legitimately signed plugins.
+            let manifest_bytes = std::fs::read(inst.manifest_path()).unwrap_or_default();
             let sig_valid = hexforge_plugin_host::verify_signature(
-                serde_json::to_vec(&inst.manifest)
-                    .unwrap_or_default()
-                    .as_slice(),
+                &manifest_bytes,
                 &inst.signature_hex,
                 &inst.pubkey_hex,
             )
@@ -961,8 +963,9 @@ pub fn install_plugin(
     let _manifest: hexforge_plugin_host::PluginManifest =
         serde_json::from_slice(&manifest_bytes)
             .map_err(|e| HexForgeError::invalid_input(format!("manifest JSON invalid: {e}")))?;
-    // For MVP, signature files are expected alongside manifest as `.sig` and `.pub` or embedded?
-    // We try to read `manifest_path.sig` and `manifest_path.pub` if they exist, otherwise use empty (developer mode).
+    // Signatures are REQUIRED (fail-closed): sidecar `<manifest>.sig` and
+    // `<manifest>.pub` must exist next to the manifest. There is no unsigned
+    // "developer mode" — sign locally with `hexforge-cli plugin keygen/sign`.
     let sig_path = format!("{}.sig", req.manifest_path);
     let pub_path = format!("{}.pub", req.manifest_path);
     let signature_hex = std::fs::read_to_string(&sig_path).unwrap_or_default();

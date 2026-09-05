@@ -105,6 +105,27 @@ pub struct PluginInstance {
     pub signature_hex: String,
 }
 
+impl PluginInstance {
+    /// Path of `manifest.json` paired with this instance's WASM file
+    /// (`plugin.wasm` ↔ `plugin.json`). Single source of the pairing
+    /// convention used by discovery and the install UI.
+    pub fn manifest_path(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.wasm_path).with_extension("json")
+    }
+
+    /// Sidecar signature/pubkey paths for the paired manifest, following the
+    /// install convention `<manifest>.sig` / `<manifest>.pub`
+    /// (e.g. `plugin.json.sig`). Used by discovery; see `install_plugin`.
+    pub fn signature_path(&self) -> std::path::PathBuf {
+        self.manifest_path().with_extension("json.sig")
+    }
+
+    /// See [`PluginInstance::signature_path`].
+    pub fn pubkey_path(&self) -> std::path::PathBuf {
+        self.manifest_path().with_extension("json.pub")
+    }
+}
+
 /// Per-instance memory limiter (NFR-9: per-instance memory limits).
 struct HostLimiter {
     max_memory_bytes: usize,
@@ -1131,8 +1152,15 @@ pub fn validate_manifest(manifest: &PluginManifest) -> Result<(), PluginError> {
     Ok(())
 }
 
-/// Scans `plugins_dir` for `*.wasm` + `*.json` pairs, verifies signatures, and returns valid instances.
-/// For MVP, looks in `./plugins` or `plugins_dir` if provided; if dir missing, returns empty.
+/// Scans `plugins_dir` for `*.wasm` + `*.json` pairs and returns installable instances.
+///
+/// Trust model (fail-closed): an entry is listed ONLY if all of these hold —
+/// manifest parses AND validates, sidecar `<manifest>.sig`/`<manifest>.pub`
+/// exist and verify over the ORIGINAL manifest file bytes, and the binary
+/// loads as a component or core module. Anything else (unsigned dev copies,
+/// tampered manifests, garbage binaries) is silently skipped: the UI must
+/// never offer an entry whose `signature_valid` it cannot prove.
+/// If dir missing, returns empty.
 pub fn list_plugins_in_dir(plugins_dir: &Path) -> Vec<PluginInstance> {
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(plugins_dir) {
@@ -1145,9 +1173,6 @@ pub fn list_plugins_in_dir(plugins_dir: &Path) -> Vec<PluginInstance> {
             continue;
         }
         let manifest_path = path.with_extension("json");
-        if !manifest_path.exists() {
-            continue;
-        }
         let manifest_bytes = match std::fs::read(&manifest_path) {
             Ok(b) => b,
             Err(_) => continue,
@@ -1156,17 +1181,42 @@ pub fn list_plugins_in_dir(plugins_dir: &Path) -> Vec<PluginInstance> {
             Ok(m) => m,
             Err(_) => continue,
         };
-        // Try to find accompanying .sig and .pubkey files or fields in manifest?
-        // For MVP, we expect manifest JSON to contain `signature_hex` and `pubkey_hex` fields if present,
-        // otherwise we skip verification (developer mode). This keeps `list_plugins` non-blocking.
-        // If no signature, we treat as stub and skip.
-        // To keep production behavior, we require valid signature if manifest has `id`.
-        // For now, just push instance with empty sigs (list is for discovery, verification happens at `install`).
+        if validate_manifest(&manifest).is_err() {
+            continue;
+        }
+        let sig_path = manifest_path.with_extension("json.sig");
+        let pub_path = manifest_path.with_extension("json.pub");
+        let (signature_hex, pubkey_hex) = match (
+            std::fs::read_to_string(&sig_path),
+            std::fs::read_to_string(&pub_path),
+        ) {
+            (Ok(sig), Ok(pubkey)) => (sig.trim().to_string(), pubkey.trim().to_string()),
+            // No sidecars → not verifiable → not listable (use install with explicit keys instead).
+            _ => continue,
+        };
+        if !verify_signature(&manifest_bytes, &signature_hex, &pubkey_hex).unwrap_or(false) {
+            continue;
+        }
+        let wasm_bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        // Load-check without a full runtime: component first, core module second (legacy).
+        // A fresh engine per file keeps fault isolation; discovery is not a hot path.
+        let engine = match Engine::new(&Config::new()) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let loadable = wasmtime::component::Component::from_binary(&engine, &wasm_bytes).is_ok()
+            || wasmtime::Module::from_binary(&engine, &wasm_bytes).is_ok();
+        if !loadable {
+            continue;
+        }
         out.push(PluginInstance {
             manifest,
             wasm_path: path.to_string_lossy().into_owned(),
-            pubkey_hex: String::new(),
-            signature_hex: String::new(),
+            pubkey_hex,
+            signature_hex,
         });
     }
     out
