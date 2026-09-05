@@ -63,7 +63,7 @@ impl Transform for AesGcmEncrypt {
                 field: "nonce".into(),
                 reason: "hex nonce required".into(),
             })?;
-        let _aad_hex = params.get("aad").and_then(|v| v.as_str()).unwrap_or("");
+        let aad_hex = params.get("aad").and_then(|v| v.as_str()).unwrap_or("");
 
         let key = hex::decode(key_hex.trim()).map_err(|e| TransformError::InvalidParameter {
             field: "key".into(),
@@ -74,14 +74,10 @@ impl Transform for AesGcmEncrypt {
                 field: "nonce".into(),
                 reason: format!("invalid hex nonce: {e}"),
             })?;
-        let aad = hex::decode(
-            params
-                .get("aad")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim(),
-        )
-        .unwrap_or_default();
+        let aad = hex::decode(aad_hex.trim()).map_err(|e| TransformError::InvalidParameter {
+            field: "aad".into(),
+            reason: format!("invalid hex aad: {e}"),
+        })?;
 
         if nonce.len() != 12 {
             return Err(TransformError::InvalidParameter {
@@ -192,7 +188,7 @@ impl Transform for AesGcmDecrypt {
                 field: "nonce".into(),
                 reason: "hex nonce required".into(),
             })?;
-        let _aad_hex = params.get("aad").and_then(|v| v.as_str()).unwrap_or("");
+        let aad_hex = params.get("aad").and_then(|v| v.as_str()).unwrap_or("");
 
         let key = hex::decode(key_hex.trim()).map_err(|e| TransformError::InvalidParameter {
             field: "key".into(),
@@ -203,14 +199,10 @@ impl Transform for AesGcmDecrypt {
                 field: "nonce".into(),
                 reason: format!("invalid hex nonce: {e}"),
             })?;
-        let aad = hex::decode(
-            params
-                .get("aad")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim(),
-        )
-        .unwrap_or_default();
+        let aad = hex::decode(aad_hex.trim()).map_err(|e| TransformError::InvalidParameter {
+            field: "aad".into(),
+            reason: format!("invalid hex aad: {e}"),
+        })?;
 
         if nonce.len() != 12 {
             return Err(TransformError::InvalidParameter {
@@ -342,5 +334,29 @@ mod tests {
                 .unwrap_err();
             assert!(matches!(err, TransformError::InvalidInput { .. }));
         }
+    }
+
+    #[test]
+    fn aes_gcm_rejects_invalid_aad_hex() {
+        let ctx = NullExecutionContext;
+        let params = serde_json::json!({
+            "key": "00".repeat(16),
+            "nonce": "00".repeat(12),
+            "aad": "not-hex!!"
+        });
+        let err = AesGcmEncrypt
+            .apply(Cow::Borrowed(b"x"), &params, &ctx)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            TransformError::InvalidParameter { ref field, .. } if field == "aad"
+        ));
+        let err = AesGcmDecrypt
+            .apply(Cow::Borrowed(b"x"), &params, &ctx)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            TransformError::InvalidParameter { ref field, .. } if field == "aad"
+        ));
     }
 }
