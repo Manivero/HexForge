@@ -906,12 +906,39 @@ pub async fn diff_snapshots(
 #[serde(rename_all = "camelCase")]
 pub struct PluginManifestDto {
     pub id: String,
+    /// Human-readable name from the manifest (`PluginTransform::display_name`
+    /// resolves WIT `get-display-name` when the binary is instantiated, but
+    /// discovery never executes WASM — the list path reports the manifest
+    /// value so the UI has one backend-owned source of truth).
+    pub display_name: String,
     pub name: String,
     pub version: String,
+    /// Transform category (`PluginTransform::category`: WIT `get-category`
+    /// or the `"Plugin"` fallback; same no-execute caveat as display_name).
+    pub category: String,
     pub author: String,
     pub signature_valid: bool,
     pub requested_capabilities: Vec<String>,
     pub granted_capabilities: Vec<String>,
+}
+
+/// Single constructor for the plugin DTO so `list_plugins` and
+/// `install_plugin` cannot drift (same fallback semantics by construction).
+fn plugin_manifest_dto(
+    manifest: hexforge_plugin_host::PluginManifest,
+    signature_valid: bool,
+) -> PluginManifestDto {
+    PluginManifestDto {
+        display_name: manifest.name.clone(),
+        name: manifest.name.clone(),
+        category: "Plugin".to_string(),
+        id: manifest.id,
+        version: manifest.version,
+        author: manifest.author,
+        signature_valid,
+        requested_capabilities: manifest.requested_capabilities,
+        granted_capabilities: manifest.granted_capabilities,
+    }
 }
 
 #[tauri::command]
@@ -929,15 +956,7 @@ pub fn list_plugins() -> Vec<PluginManifestDto> {
                 &inst.pubkey_hex,
             )
             .unwrap_or(false);
-            PluginManifestDto {
-                id: inst.manifest.id,
-                name: inst.manifest.name,
-                version: inst.manifest.version,
-                author: inst.manifest.author,
-                signature_valid: sig_valid,
-                requested_capabilities: inst.manifest.requested_capabilities,
-                granted_capabilities: inst.manifest.granted_capabilities,
-            }
+            plugin_manifest_dto(inst.manifest, sig_valid)
         })
         .collect()
 }
@@ -997,15 +1016,7 @@ pub fn install_plugin(
         &instance.pubkey_hex,
     )
     .unwrap_or(false);
-    Ok(PluginManifestDto {
-        id: instance.manifest.id,
-        name: instance.manifest.name,
-        version: instance.manifest.version,
-        author: instance.manifest.author,
-        signature_valid: sig_valid,
-        requested_capabilities: instance.manifest.requested_capabilities,
-        granted_capabilities: instance.manifest.granted_capabilities,
-    })
+    Ok(plugin_manifest_dto(instance.manifest, sig_valid))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1015,6 +1026,13 @@ pub struct GrantCapabilityRequest {
     pub capability: String,
 }
 
+/// Privileged capabilities (single source; mirrors
+/// `PluginRuntime::is_privileged_cap`). Persisting a grant would rewrite the
+/// signed manifest and invalidate its Ed25519 signature, so grant/revoke are
+/// validated session acknowledgements until a re-signing ceremony lands —
+/// the commands validate input and return `true`, persistence is NOT claimed.
+const VALID_CAPABILITIES: [&str; 3] = ["filesystem_read", "filesystem_write", "network"];
+
 #[tauri::command]
 pub fn grant_capability(req: GrantCapabilityRequest) -> HexForgeResult<bool> {
     if req.plugin_id.trim().is_empty() {
@@ -1023,8 +1041,7 @@ pub fn grant_capability(req: GrantCapabilityRequest) -> HexForgeResult<bool> {
             "pluginId must not be empty",
         ));
     }
-    let valid_caps = ["filesystem_read", "filesystem_write", "network"];
-    if !valid_caps.contains(&req.capability.as_str()) {
+    if !VALID_CAPABILITIES.contains(&req.capability.as_str()) {
         return Err(HexForgeError::invalid_parameter(
             "capability",
             format!("unknown capability '{}'", req.capability),
@@ -1048,8 +1065,7 @@ pub fn revoke_capability(req: RevokeCapabilityRequest) -> HexForgeResult<bool> {
             "pluginId must not be empty",
         ));
     }
-    let valid_caps = ["filesystem_read", "filesystem_write", "network"];
-    if !valid_caps.contains(&req.capability.as_str()) {
+    if !VALID_CAPABILITIES.contains(&req.capability.as_str()) {
         return Err(HexForgeError::invalid_parameter(
             "capability",
             format!("unknown capability '{}'", req.capability),
@@ -1448,8 +1464,10 @@ mod tests {
     fn plugin_manifest_dto_matches_ts_contract() {
         let dto = PluginManifestDto {
             id: "plugin.example".into(),
+            display_name: "Example".into(),
             name: "Example".into(),
             version: "1.0.0".into(),
+            category: "Plugin".into(),
             author: "HexForge".into(),
             signature_valid: true,
             requested_capabilities: vec!["filesystem_read".into()],
@@ -1459,8 +1477,10 @@ mod tests {
             serde_json::to_value(&dto).unwrap(),
             serde_json::json!({
                 "id": "plugin.example",
+                "displayName": "Example",
                 "name": "Example",
                 "version": "1.0.0",
+                "category": "Plugin",
                 "author": "HexForge",
                 "signatureValid": true,
                 "requestedCapabilities": ["filesystem_read"],

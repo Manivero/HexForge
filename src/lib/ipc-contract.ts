@@ -13,8 +13,10 @@
 //                    cancelNode (Cancelled), listSnapshots, diffSnapshots,
 //                    exportRecipe, importRecipe, importCyberChefRecipe (28+ mappings:
 //                    Base64/Hex/Base32/ROT13/Reverse/URL/Gzip/Zlib/Bzip2/LZMA/XOR/MD5/SHA1/SHA2/SHA256/SHA512/SHA3/BLAKE2b/s/BLAKE3/CRC32/SSDEEP/Entropy/Strings/Magic),
-//                    jumpToSnapshot (lineage-реплей), listPlugins (Ed25519 + Wasmtime fuel)
-//   ⏳ специфицировано, не подключено: installPlugin, grantCapability, revokeCapability — ждут Component Model WIT.
+//                    jumpToSnapshot (lineage-реплей), listPlugins (Ed25519 + Wasmtime fuel),
+//                    installPlugin (fail-closed + регистрация Transform),
+//                    grantCapability/revokeCapability (валидация + bool; персистентность
+//                    грантов не заявлена — переподписание манифеста вне MVP).
 //
 // Паритет типов с Rust-стороной защищён golden-тестами в
 // src-tauri/src/commands.rs (tests::*_matches_ts_contract): переименование
@@ -201,8 +203,13 @@ export type PluginCapability = "filesystem_read" | "filesystem_write" | "network
 
 export interface PluginManifestDto {
   id: PluginId;
+  /** Backend-owned display name (manifest `name`; WIT `get-display-name`
+   * резолвится только при инстанцировании — discovery WASM не исполняет). */
+  displayName: string;
   name: string;
   version: string;
+  /** Backend-owned категория (WIT `get-category` или фолбэк `"Plugin"`). */
+  category: string;
   author: string;
   signatureValid: boolean;
   requestedCapabilities: PluginCapability[];
