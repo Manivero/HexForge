@@ -243,6 +243,25 @@ impl OutputCache {
 /// Дефолтный бюджет кэша выходов: 256 МБ суммарно на промежуточные результаты.
 const DEFAULT_OUTPUT_CACHE_BYTES: usize = 256 * 1024 * 1024;
 
+/// Переопределение бюджета через `HEXFORGE_CACHE_BUDGET` (см. `.env.example`).
+/// Некорректные значения игнорируются с откатом на дефолт: запуск процесса
+/// никогда не должен падать из-за malformed env var.
+fn cache_budget_from_env_or_default() -> usize {
+    std::env::var("HEXFORGE_CACHE_BUDGET")
+        .ok()
+        .and_then(|raw| parse_cache_budget(&raw))
+        .unwrap_or(DEFAULT_OUTPUT_CACHE_BYTES)
+}
+
+fn parse_cache_budget(raw: &str) -> Option<usize> {
+    let bytes: usize = raw.trim().parse().ok()?;
+    if bytes == 0 {
+        None
+    } else {
+        Some(bytes)
+    }
+}
+
 /// Вместимость реестра активных отмен; одновременных запусков в MVP единицы,
 /// лимит защищает от утечки карт при аномальном фронте.
 const MAX_ACTIVE_CANCELLATIONS: usize = 64;
@@ -264,7 +283,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(registry: TransformRegistry) -> Self {
-        Self::with_cache_budget(registry, DEFAULT_OUTPUT_CACHE_BYTES)
+        Self::with_cache_budget(registry, cache_budget_from_env_or_default())
     }
 
     /// Тестовый конструктор с переопределением бюджета кэша.
@@ -308,6 +327,22 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_cache_budget_accepts_positive_bytes() {
+        assert_eq!(parse_cache_budget("268435456"), Some(268435456));
+        assert_eq!(parse_cache_budget("  1024  "), Some(1024));
+        assert_eq!(parse_cache_budget("1"), Some(1));
+    }
+
+    #[test]
+    fn parse_cache_budget_rejects_garbage() {
+        assert_eq!(parse_cache_budget(""), None);
+        assert_eq!(parse_cache_budget("0"), None);
+        assert_eq!(parse_cache_budget("-1"), None);
+        assert_eq!(parse_cache_budget("256MB"), None);
+        assert_eq!(parse_cache_budget("abc"), None);
+    }
 
     #[test]
     fn source_store_insert_get_release_roundtrip() {
