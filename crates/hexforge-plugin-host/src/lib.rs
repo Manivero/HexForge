@@ -20,6 +20,10 @@ use std::path::Path;
 use std::sync::Arc;
 use wasmtime::{Config, Engine, ResourceLimiter, Store};
 
+/// Keep a faulty or hostile core-WASM plugin from forcing a large host-side
+/// allocation before its output can be read from linear memory.
+const MAX_PLUGIN_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
+
 // WIT Component Model bindings — host calls plugin's exported `transform` interface.
 // The WIT file is at `wit/plugin.wit` (world `hexforge-plugin`).
 // For core modules (legacy tests) we fallback to echo behavior.
@@ -54,6 +58,31 @@ pub enum PluginError {
     CapabilityDenied(String),
     #[error("execution failed: {0}")]
     ExecutionError(String),
+}
+
+fn wasm_i32_length(length: usize, field: &str) -> Result<i32> {
+    i32::try_from(length).map_err(|_| {
+        anyhow!(PluginError::ExecutionError(format!(
+            "{field} exceeds the core WASM ABI i32 length limit"
+        )))
+    })
+}
+
+fn checked_output_length(length: i32) -> Result<usize> {
+    if length < 0 {
+        return Err(anyhow!(PluginError::ExecutionError(
+            "transform returned negative length".into()
+        )));
+    }
+
+    let length = length as usize;
+    if length > MAX_PLUGIN_OUTPUT_BYTES {
+        return Err(anyhow!(PluginError::WasmtimeError(format!(
+            "transform output exceeds the {} byte limit",
+            MAX_PLUGIN_OUTPUT_BYTES
+        ))));
+    }
+    Ok(length)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -418,6 +447,7 @@ impl PluginRuntime {
             if let Ok(func) =
                 wasm_instance.get_typed_func::<(i32, i32), i32>(&mut store, "transform")
             {
+                let input_len = wasm_i32_length(input.len(), "input")?;
                 // Allocate input in memory at offset 0
                 let mem_size = mem.data(&store).len();
                 if (input.len() + 1024) > mem_size {
@@ -436,31 +466,19 @@ impl PluginRuntime {
                     )))
                 })?;
                 // Call transform(input_ptr=0, input_len)
-                let out_len = func
-                    .call(&mut store, (0, input.len() as i32))
-                    .map_err(|e| {
-                        let msg = e.to_string();
-                        if msg.contains("fuel") {
-                            anyhow!(PluginError::WasmtimeError(
-                                "fuel exhausted in transform (NFR-9)".into()
-                            ))
-                        } else {
-                            anyhow!(PluginError::WasmtimeError(format!(
-                                "wasm trap in 'transform': {e}"
-                            )))
-                        }
-                    })?;
-                if out_len < 0 {
-                    return Err(anyhow!(PluginError::ExecutionError(
-                        "transform returned negative length".into()
-                    )));
-                }
-                let out_len = out_len as usize;
-                if out_len > 10 * 1024 * 1024 {
-                    return Err(anyhow!(PluginError::WasmtimeError(
-                        "transform output too large (DoS cap)".into()
-                    )));
-                }
+                let out_len = func.call(&mut store, (0, input_len)).map_err(|e| {
+                    let msg = e.to_string();
+                    if msg.contains("fuel") {
+                        anyhow!(PluginError::WasmtimeError(
+                            "fuel exhausted in transform (NFR-9)".into()
+                        ))
+                    } else {
+                        anyhow!(PluginError::WasmtimeError(format!(
+                            "wasm trap in 'transform': {e}"
+                        )))
+                    }
+                })?;
+                let out_len = checked_output_length(out_len)?;
                 let mut out = vec![0u8; out_len];
                 mem.read(&store, 0, &mut out).map_err(|e| {
                     anyhow!(PluginError::WasmtimeError(format!(
@@ -833,7 +851,17 @@ impl PluginRuntime {
                 wasm_instance.get_typed_func::<(i32, i32, i32, i32), i32>(&mut store, "transform")
             {
                 let params_bytes = params_json.as_bytes();
-                let total_needed = input.len() + params_bytes.len() + 1024;
+                let input_len = wasm_i32_length(input.len(), "input")?;
+                let params_len = wasm_i32_length(params_bytes.len(), "params")?;
+                let total_needed = input
+                    .len()
+                    .checked_add(params_bytes.len())
+                    .and_then(|length| length.checked_add(1024))
+                    .ok_or_else(|| {
+                        anyhow!(PluginError::ExecutionError(
+                            "input and params size overflow".into()
+                        ))
+                    })?;
                 let mem_size = mem.data(&store).len();
                 if total_needed > mem_size {
                     let pages_needed = (total_needed - mem_size).div_ceil(65536) as u64;
@@ -856,15 +884,7 @@ impl PluginRuntime {
                         )))
                     })?;
                 let out_len = func
-                    .call(
-                        &mut store,
-                        (
-                            0,
-                            input.len() as i32,
-                            input.len() as i32,
-                            params_bytes.len() as i32,
-                        ),
-                    )
+                    .call(&mut store, (0, input_len, input_len, params_len))
                     .map_err(|e| {
                         let msg = e.to_string();
                         if msg.contains("fuel") {
@@ -877,12 +897,7 @@ impl PluginRuntime {
                             )))
                         }
                     })?;
-                if out_len < 0 {
-                    return Err(anyhow!(PluginError::ExecutionError(
-                        "transform returned negative length".into()
-                    )));
-                }
-                let out_len = out_len as usize;
+                let out_len = checked_output_length(out_len)?;
                 let mut out = vec![0u8; out_len];
                 mem.read(&store, 0, &mut out).map_err(|e| {
                     anyhow!(PluginError::WasmtimeError(format!(
@@ -895,6 +910,7 @@ impl PluginRuntime {
             if let Ok(func) =
                 wasm_instance.get_typed_func::<(i32, i32), i32>(&mut store, "transform")
             {
+                let input_len = wasm_i32_length(input.len(), "input")?;
                 let mem_size = mem.data(&store).len();
                 if input.len() > mem_size {
                     let pages_needed = (input.len() - mem_size).div_ceil(65536) as u64;
@@ -909,14 +925,12 @@ impl PluginRuntime {
                         "memory write failed: {e}"
                     )))
                 })?;
-                let out_len = func
-                    .call(&mut store, (0, input.len() as i32))
-                    .map_err(|e| {
-                        anyhow!(PluginError::WasmtimeError(format!(
-                            "wasm trap in 'transform': {e}"
-                        )))
-                    })?;
-                let out_len = out_len as usize;
+                let out_len = func.call(&mut store, (0, input_len)).map_err(|e| {
+                    anyhow!(PluginError::WasmtimeError(format!(
+                        "wasm trap in 'transform': {e}"
+                    )))
+                })?;
+                let out_len = checked_output_length(out_len)?;
                 let mut out = vec![0u8; out_len];
                 mem.read(&store, 0, &mut out).map_err(|e| {
                     anyhow!(PluginError::WasmtimeError(format!(
@@ -1435,6 +1449,62 @@ mod tests {
             .unwrap();
         assert_eq!(out.as_ref(), b"dcba");
         let _ = std::fs::remove_file(&wasm_path);
+    }
+
+    #[test]
+    fn plugin_transform_rejects_invalid_output_lengths() {
+        for (label, returned_length, expected_message) in [
+            ("negative", -1, "negative length"),
+            (
+                "oversized",
+                (MAX_PLUGIN_OUTPUT_BYTES + 1) as i32,
+                "exceeds the",
+            ),
+        ] {
+            let wasm_bytes = wat::parse_str(format!(
+                r#"(module
+                    (memory (export "memory") 1)
+                    (func (export "transform") (param i32 i32) (result i32)
+                        i32.const {returned_length}
+                    )
+                )"#
+            ))
+            .unwrap();
+            let wasm_path = std::env::temp_dir().join(format!(
+                "hexforge-test-invalid-output-{label}-{}.wasm",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::write(&wasm_path, &wasm_bytes).unwrap();
+
+            let runtime = Arc::new(PluginRuntime::new(Some(1_000_000)).unwrap());
+            let instance = PluginInstance {
+                manifest: PluginManifest {
+                    id: format!("test.invalid-output.{label}"),
+                    name: "Invalid output length".into(),
+                    version: "1.0.0".into(),
+                    author: "Test".into(),
+                    requested_capabilities: vec![],
+                    granted_capabilities: vec![],
+                },
+                wasm_path: wasm_path.to_string_lossy().into_owned(),
+                pubkey_hex: String::new(),
+                signature_hex: String::new(),
+            };
+
+            let transform = runtime.as_transform(instance).unwrap();
+            let err = transform
+                .apply(
+                    Cow::Borrowed(b"input"),
+                    &serde_json::json!({}),
+                    &NullExecutionContext,
+                )
+                .unwrap_err();
+            assert!(
+                matches!(&err, TransformError::Internal(message) if message.contains(expected_message)),
+                "unexpected error for {label}: {err}"
+            );
+            let _ = std::fs::remove_file(&wasm_path);
+        }
     }
 
     #[test]
