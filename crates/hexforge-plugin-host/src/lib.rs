@@ -335,25 +335,21 @@ impl PluginRuntime {
 
         let linker = wasmtime::component::Linker::new(&self.engine);
         // No WASI imports for MVP (sandbox = no FS/network). If caps granted, we could add WASI here.
-        let _instance_w = linker.instantiate(&mut store, &component).map_err(|e| {
+        // Единственная инстанциация: повторный instantiate в том же Store
+        // дважды сжигал бы fuel и делал двойную работу.
+        // Real WIT execution via component `transform.apply` (list<u8>, string) -> result<list<u8>, string>
+        // We use the raw component instance API to avoid tight coupling to bindgen! generated names.
+        let instance = linker.instantiate(&mut store, &component).map_err(|e| {
             let msg = e.to_string();
             if msg.contains("fuel") {
                 anyhow!(PluginError::WasmtimeError(
-                    "fuel exhausted during instantiation".into()
+                    "fuel exhausted during instantiation".into(),
                 ))
             } else {
                 anyhow!(PluginError::WasmtimeError(format!(
                     "component instantiation failed: {e}"
                 )))
             }
-        })?;
-
-        // Real WIT execution via component `transform.apply` (list<u8>, string) -> result<list<u8>, string>
-        // We use the raw component instance API to avoid tight coupling to bindgen! generated names.
-        let instance = linker.instantiate(&mut store, &component).map_err(|e| {
-            anyhow!(PluginError::WasmtimeError(format!(
-                "component instantiation failed: {e}"
-            )))
         })?;
         // The WIT `apply` is exported as `hexforge:plugin/transform/apply` with signature ([u8], string) -> result<list<u8>, string>
         // We try to get it as a typed func; if not found, fallback to core module.
