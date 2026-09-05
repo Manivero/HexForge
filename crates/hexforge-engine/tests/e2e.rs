@@ -4,6 +4,7 @@
 use base64::Engine as _;
 use hexforge_core::graph::{Graph, OperationNode};
 use hexforge_core::NodeId;
+use hexforge_core::Transform;
 use hexforge_engine::graph_dto::{validate_graph, GraphDto, OperationNodeDto};
 use hexforge_engine::state::{AppState, SourceEntry};
 use hexforge_engine::{scheduler, HexForgeErrorKind};
@@ -319,6 +320,65 @@ fn e2e_plugin_host_via_transform() {
     });
     let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
     assert_eq!(out.as_slice(), b"E2E TEST");
+    let _ = std::fs::remove_file(&wasm_path);
+}
+
+#[test]
+fn e2e_wit_component_via_scheduler() {
+    // Real WIT component (Component Model path, not the core-module fallback)
+    // registered as a scheduler operation: metadata comes from the component
+    // exports, execution routes through `transform.apply`.
+    let wat_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../hexforge-plugin-host/tests/data/wit_uppercase.component.wat");
+    let wat_text = std::fs::read_to_string(&wat_path).expect("WIT component fixture must exist");
+    let wasm_bytes = wat::parse_str(&wat_text).unwrap();
+    let wasm_path = std::env::temp_dir().join(format!(
+        "hexforge-e2e-component-{}.wasm",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&wasm_path, &wasm_bytes).unwrap();
+    let runtime =
+        std::sync::Arc::new(hexforge_plugin_host::PluginRuntime::new(Some(1_000_000)).unwrap());
+    let manifest = hexforge_plugin_host::PluginManifest {
+        id: "manifest.fallback".into(),
+        name: "Manifest Fallback".into(),
+        version: "9.9.9".into(),
+        author: "Test".into(),
+        requested_capabilities: vec![],
+        granted_capabilities: vec![],
+    };
+    let instance = hexforge_plugin_host::PluginInstance {
+        manifest,
+        wasm_path: wasm_path.to_string_lossy().into_owned(),
+        pubkey_hex: String::new(),
+        signature_hex: String::new(),
+    };
+    let transform = runtime.as_transform(instance).unwrap();
+    // WIT identity wins over the manifest fallback.
+    assert_eq!(transform.id(), "comp.uppercase");
+    assert_eq!(transform.version(), "1.0.0");
+    let registry = hexforge_ops::build_registry();
+    let leaked: Box<dyn hexforge_core::Transform> = Box::new(transform);
+    let static_ref: &'static dyn hexforge_core::Transform = Box::leak(leaked);
+    let state = AppState::new({
+        let mut reg = registry;
+        reg.register(static_ref);
+        reg
+    });
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"e2e wit".to_vec()));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "comp.uppercase".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.as_slice(), b"E2E WIT");
     let _ = std::fs::remove_file(&wasm_path);
 }
 
