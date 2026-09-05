@@ -34,12 +34,16 @@ impl Transform for JwtDecode {
     ) -> Result<ByteView<'a>, TransformError> {
         let s = String::from_utf8_lossy(input.as_ref());
         let s = s.trim();
-        let parts: Vec<&str> = s.split('.').collect();
-        if parts.len() != 3 {
+        let raw: Vec<&str> = s.split('.').collect();
+        if raw.len() != 3 {
             return Err(TransformError::InvalidInput {
-                reason: format!("JWT must have 3 dot-separated parts, got {}", parts.len()),
+                reason: format!("JWT must have 3 dot-separated parts, got {}", raw.len()),
             });
         }
+        // Толерантность к '='-паддингу: спецификация JWT его запрещает,
+        // но реальные продюсеры иногда эмиттят паддингованный base64url.
+        // Проверки — по обрезанным частям, в выводе signature — как в вводе.
+        let parts: Vec<&str> = raw.iter().map(|p| p.trim_end_matches('=')).collect();
         let header_json = decode_b64_json(parts[0], "header")?;
         let payload_json = decode_b64_json(parts[1], "payload")?;
         // Signature stays as-is (base64url); we just verify it is valid base64url
@@ -51,7 +55,7 @@ impl Transform for JwtDecode {
         let out = serde_json::json!({
             "header": header_json,
             "payload": payload_json,
-            "signature": parts[2]
+            "signature": raw[2]
         });
         let pretty = serde_json::to_string_pretty(&out)
             .map_err(|e| TransformError::Internal(e.to_string()))?;
@@ -116,5 +120,32 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(err2, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn decode_accepts_padded_base64url_parts() {
+        use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+        // Паддингованный base64url (с '=') спецификацией JWT запрещён,
+        // но встречается у реальных продюсеров — обязаны принимать.
+        let h = URL_SAFE.encode(br#"{"a":1}"#);
+        let p = URL_SAFE.encode(br#"{"sub":"1"}"#);
+        let sig = URL_SAFE.encode(b"signature!");
+        assert!(
+            h.contains('=') && p.contains('=') && sig.contains('='),
+            "fixture must carry '=' padding: {h} {p} {sig}"
+        );
+        let token = format!("{h}.{p}.{sig}");
+        let ctx = NullExecutionContext;
+        let out = JwtDecode
+            .apply(
+                Cow::Borrowed(token.as_bytes()),
+                &serde_json::json!({}),
+                &ctx,
+            )
+            .unwrap();
+        let text = String::from_utf8(out.into_owned()).unwrap();
+        assert!(text.contains("\"sub\""), "payload missing: {text}");
+        // Echo сигнатуры — байт-в-байт как во вводе (с паддингом).
+        assert!(text.contains(&sig), "signature echo changed: {text}");
     }
 }
