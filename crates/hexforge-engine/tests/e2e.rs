@@ -7,7 +7,7 @@ use hexforge_core::NodeId;
 use hexforge_engine::graph_dto::{validate_graph, GraphDto, OperationNodeDto};
 use hexforge_engine::state::{AppState, SourceEntry};
 use hexforge_engine::{scheduler, HexForgeErrorKind};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 fn token() -> Arc<AtomicBool> {
@@ -776,4 +776,232 @@ fn e2e_large_input_streaming_1m() {
     assert_eq!(out.len(), data.len());
     assert_eq!(out[0], b'n'); // rot13 a -> n
     assert_eq!(out[1024 * 1024 - 1], b'n');
+}
+
+const E2E_MB: usize = 1024 * 1024;
+
+/// Собирает цепочку rot13(source) → base64.encode для больших входов.
+fn large_pipeline(state: &AppState, data: Vec<u8>) -> hexforge_core::NodeId {
+    let h = state.sources.write().insert(SourceEntry::InMemory(data));
+    let n1 = NodeId::new_v4();
+    let n2 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: n1,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: n2,
+        operation_id: "encoding.base64.encode".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![n1],
+    });
+    n2
+}
+
+#[test]
+fn e2e_large_file_mmap_64m_pipeline() {
+    // Сценарий large-file: файловый источник через mmap (SourceStore не
+    // грузит файл в RAM целиком) через streamable rot13 → base64.
+    // rot13('a') = 'n'; base64("nnn") = "bm5u", хвост 1 байт "n" = "bg==".
+    let len = 64 * E2E_MB;
+    let path = std::env::temp_dir().join(format!("hexforge-e2e-{}-64m.bin", std::process::id()));
+    std::fs::write(&path, vec![b'a'; len]).unwrap();
+    let file = std::fs::File::open(&path).unwrap();
+    // SAFETY: файл только что создан тестом, никто его не меняет, пока живёт mapping.
+    let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    drop(file);
+
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state.sources.write().insert(SourceEntry::Mapped(mmap));
+    let n1 = NodeId::new_v4();
+    let n2 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: n1,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    state.graph.write().insert_node(OperationNode {
+        id: n2,
+        operation_id: "encoding.base64.encode".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![n1],
+    });
+
+    let events = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&events);
+    let out = scheduler::execute_chain(&state, &n2, &token(), &|_| {
+        counter.fetch_add(1, Ordering::Relaxed);
+    })
+    .unwrap();
+
+    assert_eq!(out.len(), len.div_ceil(3) * 4);
+    assert!(out.starts_with(b"bm5u"));
+    assert!(out.ends_with(b"bg=="));
+    assert!(
+        events.load(Ordering::Relaxed) > 0,
+        "streaming pipeline must emit progress"
+    );
+    drop(state); // освободить mmap перед удалением (Windows держит лок)
+    std::fs::remove_file(&path).unwrap();
+}
+
+#[test]
+fn e2e_large_input_128m_parallel_pipeline_correctness() {
+    // 2 стадии + вход > 64 МиБ → execute_fused_parallel: потоки на стадию,
+    // bounded-канал с backpressure. Результат обязан совпасть с точным base64.
+    // 128 МиБ mod 3 = 2 → хвост "nn" = "bm4=".
+    let len = 128 * E2E_MB;
+    let state = AppState::new(hexforge_ops::build_registry());
+    let n2 = large_pipeline(&state, vec![b'a'; len]);
+    let out = scheduler::execute_chain(&state, &n2, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), len.div_ceil(3) * 4);
+    assert!(out.starts_with(b"bm5u"));
+    assert!(out.ends_with(b"bm4="));
+    // Середина тоже rot13+base64, а не мусор потоков: квант, выровненный
+    // на границу base64-блока (4 байта), обязан быть "bm5u" (квант "nnn").
+    let mid = (out.len() / 2) & !3;
+    assert_eq!(&out[mid..mid + 4], b"bm5u");
+}
+
+#[test]
+fn e2e_large_input_256m_single_op_boundary_cache() {
+    // Выход ровно 256 МиБ == дефолтный бюджет: `size > max` ложно → кэшируется
+    // (граничное условие put). Повторный прогон — cache hit с тем же результатом.
+    let len = 256 * E2E_MB;
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'a'; len]));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), len);
+    assert_eq!(out[0], b'n');
+    assert_eq!(out[len - 1], b'n');
+    assert_eq!(state.cache.lock().entries_len(), 1);
+
+    let out2 = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.as_slice(), out2.as_slice());
+    assert!(state.cache.lock().hits >= 1);
+}
+
+#[test]
+fn e2e_large_output_over_budget_not_cached_but_correct() {
+    // Выход больше бюджета: корректность сохраняется, но запись не кэшируется
+    // (put отбрасывает сверхбюджетные), повторный прогон — снова miss + успех.
+    let state = AppState::with_cache_budget(hexforge_ops::build_registry(), E2E_MB);
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'a'; 4 * E2E_MB]));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    let out = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), 4 * E2E_MB);
+    assert!(out.iter().all(|&b| b == b'n'));
+    assert_eq!(state.cache.lock().entries_len(), 0);
+
+    let misses = state.cache.lock().misses;
+    let out2 = scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    assert_eq!(out.as_slice(), out2.as_slice());
+    assert!(state.cache.lock().misses > misses);
+    assert_eq!(state.cache.lock().entries_len(), 0);
+}
+
+#[test]
+fn e2e_multi_source_large_concat() {
+    // Multi-source merge на больших входах: 2×8 МиБ → 16 МиБ, порядок входов
+    // и граница склейки точные (rot13 'A'='N', 'B'='O').
+    let half = 8 * E2E_MB;
+    let state = AppState::new(hexforge_ops::build_registry());
+    let ha = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'A'; half]));
+    let hb = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'B'; half]));
+    let na = NodeId::new_v4();
+    let nb = NodeId::new_v4();
+    let nc = NodeId::new_v4();
+    for (id, h) in [(na, ha), (nb, hb)] {
+        state.graph.write().insert_node(OperationNode {
+            id,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": h.to_string() }),
+            inputs: vec![],
+        });
+    }
+    state.graph.write().insert_node(OperationNode {
+        id: nc,
+        operation_id: "streaming.concat".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({}),
+        inputs: vec![na, nb],
+    });
+    let out = scheduler::execute_chain(&state, &nc, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), 2 * half);
+    assert_eq!(out[0], b'N');
+    assert_eq!(out[half - 1], b'N');
+    assert_eq!(out[half], b'O');
+    assert_eq!(out[2 * half - 1], b'O');
+}
+
+#[test]
+fn e2e_cancel_parallel_pipeline_never_reports_partial_success() {
+    // Regression: отмена parallel-fused прогона (4 чанка, отмена бьёт в feed)
+    // раньше возвращала Ok(обрезанный выход) и травила memoization-кэш под
+    // ключом полного входа. Инвариант: либо Err(Cancelled), либо ПОЛНЫЙ
+    // корректный выход; повторный прогон со свежим токеном — полный выход.
+    let len = 256 * E2E_MB;
+    let full_b64_len = len.div_ceil(3) * 4;
+    let state = AppState::new(hexforge_ops::build_registry());
+    let n2 = large_pipeline(&state, vec![b'a'; len]);
+
+    let t = token();
+    let killer = Arc::clone(&t);
+    let handle = std::thread::spawn(move || {
+        // Первый чанк (64 МиБ memcpy) заведомо дольше 1 мс на любом железе —
+        // отмена приземляется в feed до его завершения, детерминированно.
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        killer.store(true, Ordering::SeqCst);
+    });
+    let res = scheduler::execute_chain(&state, &n2, &t, &no_progress);
+    handle.join().unwrap();
+    match res {
+        Err(e) => assert_eq!(e.kind, HexForgeErrorKind::Cancelled),
+        Ok(out) => {
+            // Отмена опоздала: выход обязан быть полным и корректным.
+            assert_eq!(out.len(), full_b64_len);
+            assert!(out.starts_with(b"bm5u"));
+        }
+    }
+
+    // Кэш не отравлен частичным выходом: свежий прогон — полный результат.
+    let out = scheduler::execute_chain(&state, &n2, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), full_b64_len);
+    assert!(out.starts_with(b"bm5u"));
+    assert!(out.ends_with(b"bg=="));
 }

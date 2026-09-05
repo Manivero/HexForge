@@ -61,7 +61,7 @@ fn decode_base85(s: &str) -> Result<Vec<u8>, String> {
             continue;
         }
         if c == 'z' {
-            if filtered.len() % 5 != 0 {
+            if !filtered.len().is_multiple_of(5) {
                 return Err("'z' shortcut is only valid at group boundary".into());
             }
             // 'z' = 4 нулевых байта; "!!!!!" декодируется ровно в них.

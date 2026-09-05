@@ -568,26 +568,27 @@ fn finalize_fused(
     final_output: Vec<u8>,
 ) -> Arc<Vec<u8>> {
     let last_index = stages.len() - 1;
-    let mut final_cached: Option<(String, Arc<Vec<u8>>)> = None;
-    for (i, stage) in stages.iter().enumerate() {
+    for stage in stages.iter() {
         let st = stage.lock();
         let input_hash = st.input_hasher.finalize();
         let output_hash = st.output_hasher.finalize();
         record_output(&st.node, state, input_hash, output_hash, None, Vec::new());
-
-        if i == last_index {
-            let key = hexforge_core::reproducibility_key(
-                &st.node.operation_id,
-                &st.node.operation_version,
-                &input_hash.to_hex()[..],
-                &st.node.params,
-            );
-            let arc = Arc::new(final_output.clone());
-            state.cache.lock().put(key.clone(), Arc::clone(&arc));
-            final_cached = Some((key, arc));
-        }
     }
-    final_cached.expect("last stage always sets output").1
+
+    // Кэш только для последней стадии. Без clone: final_output больше нигде
+    // не используется — отдаём буфер в Arc напрямую вместо memcpy всего
+    // выхода (до 256 МиБ).
+    let st = stages[last_index].lock();
+    let key = hexforge_core::reproducibility_key(
+        &st.node.operation_id,
+        &st.node.operation_version,
+        &st.input_hasher.finalize().to_hex()[..],
+        &st.node.params,
+    );
+    let arc = Arc::new(final_output);
+    state.cache.lock().put(key, Arc::clone(&arc));
+    drop(st);
+    arc
 }
 
 /// Параллельный конвейер: каждая стадия — отдельный поток, чанки идут через
@@ -685,6 +686,7 @@ fn execute_fused_parallel(
     } else {
         &ranges
     };
+    let mut fed_chunks = 0usize;
     'feed: for (index, (start, end)) in effective_ranges.iter().copied().enumerate() {
         if token.load(Ordering::Relaxed) {
             break 'feed;
@@ -699,6 +701,7 @@ fn execute_fused_parallel(
         if first_tx.send(msg).is_err() {
             break 'feed;
         }
+        fed_chunks += 1;
     }
     // вход исчерпан: первая стадия доработает и закроет цепочку.
     // (take() вместо drop: SyncSender не Copy — забираем по значению.)
@@ -734,6 +737,23 @@ fn execute_fused_parallel(
 
     if let Some(e) = pipe_err {
         return Err(e);
+    }
+
+    // Feed оборван отменой или смертью потребителя: частичный выход никогда
+    // не выдаём за успех и не кладём в кэш — иначе memoization отравится
+    // обрезанными байтами под ключом полного входа, и повторные прогоны
+    // будут вечно получать усечённый результат из кэша.
+    if fed_chunks != effective_ranges.len() {
+        let last_stage_id = { run.stages[stages_len - 1].lock().node.id };
+        if token.load(Ordering::Relaxed) {
+            return Err(HexForgeError::cancelled_for_node(
+                last_stage_id,
+                "parallel pipeline execution was cancelled before all chunks were fed",
+            ));
+        }
+        return Err(HexForgeError::internal(
+            "parallel pipeline feed interrupted before all chunks were fed",
+        ));
     }
 
     let out = finalize_fused(state, &run.stages, final_output);

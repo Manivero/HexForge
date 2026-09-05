@@ -98,8 +98,10 @@ fn bench_execute_chain_multi_source(c: &mut Criterion) {
 fn bench_64m_pipeline(c: &mut Criterion) {
     // NFR-1 gate: 64 MiB default chunk handling should be <100ms for single streamable op
     // This bench uses 64 MiB of 'a' and a streamable rot13 -> base64 chain, similar to scheduler fusion
+    // Дефолтные 100 сэмплов Criterion по 64 МиБ — часы прогона: gate достаточно 10.
     c.benchmark_group("pipeline_64M")
         .throughput(Throughput::Bytes(64 * 1024 * 1024))
+        .sample_size(10)
         .bench_function("rot13_64M", |b| {
             b.iter(|| {
                 let state = AppState::new(hexforge_ops::build_registry());
