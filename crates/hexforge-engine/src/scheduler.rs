@@ -905,8 +905,12 @@ pub fn replay_snapshot(
                     .map(|v| Cow::Borrowed(v.as_slice()))
                     .collect();
                 let ctx: &dyn ExecutionContext = &NullExecutionContext;
+                // Исторические params из снапшота, а не текущие из графа:
+                // линейный путь ниже реплеит step.params, merge-путь обязан
+                // делать то же — иначе правка параметров merge-узла после
+                // снапшота ломала бы jump_to_snapshot через output mismatch.
                 let view = merge
-                    .apply_merge(views, &node.params, ctx)
+                    .apply_merge(views, &snap.params, ctx)
                     .map_err(HexForgeError::from)?;
                 let output: Arc<Vec<u8>> = Arc::new(view.into_owned());
                 if Some(blake3::hash(output.as_slice())) != snap.output_content_hash {
@@ -1405,6 +1409,76 @@ mod tests {
 
         // История: по снапшоту на каждый выполненный узел DAG (4 узла).
         assert_eq!(state.history.read().order.len(), 4);
+    }
+
+    #[test]
+    fn merge_replay_uses_historical_params_after_graph_change() {
+        // Семантика replay v2: merge-путь обязан исполнять исторические
+        // params из снапшота (как линейный путь через step.params), а не
+        // текущие params графа — иначе прыжок после правки merge-узла
+        // завершился бы output mismatch вместо faithful replay.
+        let state = AppState::new(hexforge_ops::build_registry());
+        let ha = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"A".to_vec()));
+        let hb = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"B".to_vec()));
+        let na = NodeId::new_v4();
+        let nb = NodeId::new_v4();
+        let nc = NodeId::new_v4();
+        state.graph.write().insert_node(OperationNode {
+            id: na,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": ha.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nb,
+            operation_id: "text.rot13".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({ "sourceHandle": hb.to_string() }),
+            inputs: vec![],
+        });
+        state.graph.write().insert_node(OperationNode {
+            id: nc,
+            operation_id: "streaming.concat".into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![na, nb],
+        });
+
+        // rot13("A") => "N", rot13("B") => "O", concat => "NO".
+        let out = execute_chain(&state, &nc, &token(), &no_progress).unwrap();
+        assert_eq!(out.as_slice(), b"NO");
+        let merge_snap = {
+            let history = state.history.read();
+            history
+                .order
+                .iter()
+                .find_map(|id| {
+                    history
+                        .snapshots
+                        .get(id)
+                        .filter(|s| s.node_id == nc)
+                        .map(|s| s.id)
+                })
+                .expect("merge snapshot recorded")
+        };
+
+        // Мутируем params merge-узла в текущем графе уже после снапшота.
+        {
+            let mut graph = state.graph.write();
+            let mut node = graph.nodes.get(&nc).cloned().unwrap();
+            node.params = serde_json::json!({ "note": "edited after snapshot" });
+            graph.insert_node(node);
+        }
+
+        let replayed = replay_snapshot(&state, merge_snap).unwrap();
+        assert_eq!(replayed.as_slice(), b"NO");
     }
 
     #[test]
