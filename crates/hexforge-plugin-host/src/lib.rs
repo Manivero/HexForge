@@ -350,13 +350,11 @@ impl PluginRuntime {
 
         // Real WIT execution via component `transform.apply` (list<u8>, string) -> result<list<u8>, string>
         // We use the raw component instance API to avoid tight coupling to bindgen! generated names.
-        let instance = linker
-            .instantiate(&mut store, &component)
-            .map_err(|e| {
-                anyhow!(PluginError::WasmtimeError(format!(
-                    "component instantiation failed: {e}"
-                )))
-            })?;
+        let instance = linker.instantiate(&mut store, &component).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "component instantiation failed: {e}"
+            )))
+        })?;
         // The WIT `apply` is exported as `hexforge:plugin/transform/apply` with signature ([u8], string) -> result<list<u8>, string>
         // We try to get it as a typed func; if not found, fallback to core module.
         let func = instance
@@ -366,9 +364,8 @@ impl PluginRuntime {
                     "component does not export hexforge:plugin/transform/apply — fallback to core module".into(),
                 ))
             })?;
-        let (result,): (Result<Vec<u8>, String>,) = func
-            .call(&mut store, (input, params_json))
-            .map_err(|e| {
+        let (result,): (Result<Vec<u8>, String>,) =
+            func.call(&mut store, (input, params_json)).map_err(|e| {
                 let msg = e.to_string();
                 if msg.contains("fuel") {
                     anyhow!(PluginError::WasmtimeError(
@@ -642,19 +639,22 @@ impl PluginTransform {
     )> {
         let wasm_bytes = std::fs::read(&instance.wasm_path)
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("read wasm: {e}"))))?;
-        let component = match wasmtime::component::Component::from_binary(&runtime.engine, &wasm_bytes) {
-            Ok(c) => c,
-            Err(_) => return Err(anyhow!("not a component")),
-        };
+        let component =
+            match wasmtime::component::Component::from_binary(&runtime.engine, &wasm_bytes) {
+                Ok(c) => c,
+                Err(_) => return Err(anyhow!("not a component")),
+            };
         let mut store = Store::new(&runtime.engine, HostState::new(runtime.max_memory_bytes));
         store.limiter(|s| &mut s.limiter);
-        store.set_fuel(runtime.fuel_limit).map_err(|e| {
-            anyhow!(PluginError::WasmtimeError(format!("fuel set failed: {e}")))
-        })?;
+        store
+            .set_fuel(runtime.fuel_limit)
+            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("fuel set failed: {e}"))))?;
         let linker = wasmtime::component::Linker::new(&runtime.engine);
-        let inst = linker
-            .instantiate(&mut store, &component)
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("instantiate failed: {e}"))))?;
+        let inst = linker.instantiate(&mut store, &component).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "instantiate failed: {e}"
+            )))
+        })?;
         // Try to call WIT getters via typed funcs; if any fail, fallback to manifest
         let get_id = inst
             .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-id")
@@ -669,23 +669,35 @@ impl PluginTransform {
             .call(&mut store, ())
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-version trap: {e}"))))?;
         let get_display = inst
-            .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-display-name")
+            .get_typed_func::<(), (String,)>(
+                &mut store,
+                "hexforge:plugin/transform/get-display-name",
+            )
             .map_err(|_| anyhow!("no get-display-name"))?;
-        let (display_name,): (String,) = get_display
-            .call(&mut store, ())
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-display-name trap: {e}"))))?;
+        let (display_name,): (String,) = get_display.call(&mut store, ()).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "get-display-name trap: {e}"
+            )))
+        })?;
         let get_category = inst
             .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-category")
             .map_err(|_| anyhow!("no get-category"))?;
-        let (category,): (String,) = get_category
-            .call(&mut store, ())
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-category trap: {e}"))))?;
+        let (category,): (String,) = get_category.call(&mut store, ()).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "get-category trap: {e}"
+            )))
+        })?;
         let get_schema = inst
-            .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-params-schema")
+            .get_typed_func::<(), (String,)>(
+                &mut store,
+                "hexforge:plugin/transform/get-params-schema",
+            )
             .map_err(|_| anyhow!("no get-params-schema"))?;
-        let (schema_str,): (String,) = get_schema
-            .call(&mut store, ())
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-params-schema trap: {e}"))))?;
+        let (schema_str,): (String,) = get_schema.call(&mut store, ()).map_err(|e| {
+            anyhow!(PluginError::WasmtimeError(format!(
+                "get-params-schema trap: {e}"
+            )))
+        })?;
         let params_schema: serde_json::Value =
             serde_json::from_str(&schema_str).unwrap_or(serde_json::json!({}));
         let get_caps = inst
@@ -694,9 +706,12 @@ impl PluginTransform {
                 "hexforge:plugin/transform/get-capabilities",
             )
             .map_err(|_| anyhow!("no get-capabilities"))?;
-        let ((deterministic, streamable, memory_cost_str),): ((bool, bool, String),) = get_caps
-            .call(&mut store, ())
-            .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-capabilities trap: {e}"))))?;
+        let ((deterministic, streamable, memory_cost_str),): ((bool, bool, String),) =
+            get_caps.call(&mut store, ()).map_err(|e| {
+                anyhow!(PluginError::WasmtimeError(format!(
+                    "get-capabilities trap: {e}"
+                )))
+            })?;
         let memory_cost = match memory_cost_str.as_str() {
             "constant" => MemoryCost::Constant,
             "per-chunk" => MemoryCost::PerChunk,
@@ -1668,7 +1683,10 @@ mod tests {
         "#;
         let wasm_bytes = wat::parse_str(wat_str).unwrap();
         let dir = std::env::temp_dir();
-        let wasm_path = dir.join(format!("hexforge-test-wit-full-{}.wasm", uuid::Uuid::new_v4()));
+        let wasm_path = dir.join(format!(
+            "hexforge-test-wit-full-{}.wasm",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&wasm_path, &wasm_bytes).unwrap();
         let runtime = std::sync::Arc::new(PluginRuntime::new(Some(1_000_000)).unwrap());
         let manifest = PluginManifest {
@@ -1695,11 +1713,7 @@ mod tests {
         // Verify transform execution via WASM (uppercase)
         let ctx = NullExecutionContext;
         let out = transform
-            .apply(
-                Cow::Borrowed(b"wit hello"),
-                &serde_json::json!({}),
-                &ctx,
-            )
+            .apply(Cow::Borrowed(b"wit hello"), &serde_json::json!({}), &ctx)
             .unwrap();
         assert_eq!(out.as_ref(), b"WIT HELLO");
         // Verify denied capability handling: try to install with ungranted cap
@@ -1740,7 +1754,10 @@ mod tests {
         let rt3 = PluginRuntime::new(Some(1000)).unwrap();
         let wat_loop = r#"(module (memory (export "memory") 1) (func (export "transform") (param i32 i32) (result i32) (loop (br 0)) i32.const 0))"#;
         let wasm_loop = wat::parse_str(wat_loop).unwrap();
-        let wasm_path_loop = dir.join(format!("hexforge-test-wit-loop-{}.wasm", uuid::Uuid::new_v4()));
+        let wasm_path_loop = dir.join(format!(
+            "hexforge-test-wit-loop-{}.wasm",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::write(&wasm_path_loop, &wasm_loop).unwrap();
         let instance_loop = PluginInstance {
             manifest: PluginManifest {
@@ -1756,7 +1773,11 @@ mod tests {
             signature_hex: String::new(),
         };
         let res3 = rt3.execute(&instance_loop, b"test");
-        assert!(res3.is_ok() || format!("{:?}", res3).contains("fuel") || format!("{:?}", res3).contains("trap"));
+        assert!(
+            res3.is_ok()
+                || format!("{:?}", res3).contains("fuel")
+                || format!("{:?}", res3).contains("trap")
+        );
         let _ = std::fs::remove_file(&wasm_path);
         let _ = std::fs::remove_file(&wasm_path_loop);
     }
