@@ -36,18 +36,22 @@ impl Transform for HtmlEncode {
         _params: &serde_json::Value,
         _ctx: &dyn ExecutionContext,
     ) -> Result<ByteView<'a>, TransformError> {
-        let mut out = String::with_capacity(input.len());
+        // Байтовый проход: всё, кроме пяти спецсимволов, копируется как есть.
+        // (Раньше здесь было `out.push(other as char)` на String — байты ≥0x80
+        // превращались в char U+0080..U+00FF и перекодировались в UTF-8 заново,
+        // молча портя любой не-ASCII ввод, напр. "héllo".)
+        let mut out: Vec<u8> = Vec::with_capacity(input.len());
         for &b in input.as_ref() {
             match b {
-                b'&' => out.push_str("&amp;"),
-                b'<' => out.push_str("&lt;"),
-                b'>' => out.push_str("&gt;"),
-                b'"' => out.push_str("&quot;"),
-                b'\'' => out.push_str("&#39;"),
-                other => out.push(other as char),
+                b'&' => out.extend_from_slice(b"&amp;"),
+                b'<' => out.extend_from_slice(b"&lt;"),
+                b'>' => out.extend_from_slice(b"&gt;"),
+                b'"' => out.extend_from_slice(b"&quot;"),
+                b'\'' => out.extend_from_slice(b"&#39;"),
+                other => out.push(other),
             }
         }
-        Ok(Cow::Owned(out.into_bytes()))
+        Ok(Cow::Owned(out))
     }
 }
 
@@ -183,6 +187,30 @@ mod tests {
             .apply(Cow::Borrowed(b"Hello World"), &json!({}), &ctx)
             .unwrap();
         assert_eq!(out.as_ref(), b"Hello World");
+    }
+
+    #[test]
+    fn encode_preserves_non_ascii_bytes() {
+        // "héllo © <b>" в UTF-8: escape только ASCII-спецсимволы,
+        // многобайтовые последовательности копируются байт-в-байт.
+        let ctx = NullExecutionContext;
+        let input = "héllo © <b>".as_bytes();
+        let out = HtmlEncode
+            .apply(Cow::Borrowed(input), &json!({}), &ctx)
+            .unwrap();
+        let expected = "héllo © &lt;b&gt;".as_bytes();
+        assert_eq!(out.as_ref(), expected);
+    }
+
+    #[test]
+    fn roundtrip_preserves_non_ascii() {
+        let ctx = NullExecutionContext;
+        let original = "Tom & Jerry héllo ©";
+        let enc = HtmlEncode
+            .apply(Cow::Borrowed(original.as_bytes()), &json!({}), &ctx)
+            .unwrap();
+        let dec = HtmlDecode.apply(enc, &json!({}), &ctx).unwrap();
+        assert_eq!(dec.as_ref(), original.as_bytes());
     }
 
     #[test]
