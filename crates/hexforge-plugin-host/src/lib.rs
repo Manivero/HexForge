@@ -548,16 +548,28 @@ impl PluginRuntime {
 pub struct PluginTransform {
     runtime: Arc<PluginRuntime>,
     instance: PluginInstance,
-    // Cached metadata from WIT or manifest (for Transform trait)
-    id: String,
-    version: String,
-    display_name: String,
-    category: String,
+    // Cached metadata from WIT or manifest. TransformRegistry retains plugin
+    // transforms for the life of the process, and its Transform contract
+    // intentionally exposes these fields as static strings.
+    id: &'static str,
+    version: &'static str,
+    display_name: &'static str,
+    category: &'static str,
     params_schema: serde_json::Value,
     capabilities: TransformCapabilities,
 }
 
 impl PluginTransform {
+    /// Own metadata for the process lifetime required by `Transform`.
+    ///
+    /// Plugin transforms themselves are retained by `TransformRegistry` for
+    /// that lifetime. Allocating the strings here makes the lifetime explicit
+    /// and avoids manufacturing a `'static` reference to a field that could
+    /// be dropped.
+    fn retain_metadata(value: String) -> &'static str {
+        Box::leak(value.into_boxed_str())
+    }
+
     /// Creates a new PluginTransform from a runtime and instance.
     /// Tries to query WIT metadata via component; falls back to manifest and defaults.
     pub fn new(runtime: Arc<PluginRuntime>, instance: PluginInstance) -> Result<Self> {
@@ -566,10 +578,10 @@ impl PluginTransform {
             return Ok(Self {
                 runtime,
                 instance: wit_meta.0,
-                id: wit_meta.1,
-                version: wit_meta.2,
-                display_name: wit_meta.3,
-                category: wit_meta.4,
+                id: Self::retain_metadata(wit_meta.1),
+                version: Self::retain_metadata(wit_meta.2),
+                display_name: Self::retain_metadata(wit_meta.3),
+                category: Self::retain_metadata(wit_meta.4),
                 params_schema: wit_meta.5,
                 capabilities: wit_meta.6,
             });
@@ -589,10 +601,10 @@ impl PluginTransform {
         Ok(Self {
             runtime,
             instance,
-            id,
-            version,
-            display_name,
-            category,
+            id: Self::retain_metadata(id),
+            version: Self::retain_metadata(version),
+            display_name: Self::retain_metadata(display_name),
+            category: Self::retain_metadata(category),
             params_schema,
             capabilities,
         })
@@ -697,29 +709,19 @@ impl PluginTransform {
 
 impl Transform for PluginTransform {
     fn id(&self) -> &'static str {
-        // We need to return 'static str, but we have owned String. We leak for Transform trait compatibility.
-        // For MVP, we use `Box::leak` to create 'static str from owned string.
-        // This is acceptable for plugin registry (leaked once per plugin, not per call).
-        // Alternatively, we could require PluginTransform to be `&'static self` but trait demands 'static.
-        // We work around by leaking.
-        let s: &str = &self.id;
-        // SAFETY: leaking is intentional for 'static requirement; plugin id is immutable for lifetime of process.
-        unsafe { &*(s as *const str) }
+        self.id
     }
 
     fn version(&self) -> &'static str {
-        let s: &str = &self.version;
-        unsafe { &*(s as *const str) }
+        self.version
     }
 
     fn display_name(&self) -> &'static str {
-        let s: &str = &self.display_name;
-        unsafe { &*(s as *const str) }
+        self.display_name
     }
 
     fn category(&self) -> &'static str {
-        let s: &str = &self.category;
-        unsafe { &*(s as *const str) }
+        self.category
     }
 
     fn params_schema(&self) -> serde_json::Value {
@@ -1486,11 +1488,20 @@ mod tests {
             signature_hex: String::new(),
         };
         let transform = runtime.as_transform(instance).unwrap();
-        assert_eq!(transform.id(), "custom.test");
-        assert_eq!(transform.version(), "2.3.4");
-        assert_eq!(transform.display_name(), "Custom Test");
-        assert_eq!(transform.category(), "Plugin");
+        let id: &'static str = transform.id();
+        let version: &'static str = transform.version();
+        let display_name: &'static str = transform.display_name();
+        let category: &'static str = transform.category();
         assert!(transform.capabilities().deterministic);
+        drop(transform);
+
+        // Transform exposes static metadata because the registry keeps dynamic
+        // plugin transforms for the process lifetime. These references must
+        // remain valid even if a standalone wrapper is dropped first.
+        assert_eq!(id, "custom.test");
+        assert_eq!(version, "2.3.4");
+        assert_eq!(display_name, "Custom Test");
+        assert_eq!(category, "Plugin");
         let _ = std::fs::remove_file(&wasm_path);
     }
 
