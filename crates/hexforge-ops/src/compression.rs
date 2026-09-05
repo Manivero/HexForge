@@ -25,12 +25,30 @@ fn compress_bytes(encoder: &mut dyn Read) -> Result<Vec<u8>, TransformError> {
 }
 
 fn decompress_bytes(decoder: &mut dyn Read) -> Result<Vec<u8>, TransformError> {
+    decompress_limited(decoder, MAX_DECOMPRESSED_BYTES)
+}
+
+/// Верхний предел распакованного выхода: защита от decompression bomb
+/// (килобайты входа → гигабайты выхода вешали бы приложение через OOM).
+/// Совпадает с бюджетом output-кэша движка: большее всё равно не кэшируется.
+pub(crate) const MAX_DECOMPRESSED_BYTES: u64 = 256 * 1024 * 1024;
+
+fn decompress_limited(decoder: &mut dyn Read, limit: u64) -> Result<Vec<u8>, TransformError> {
     let mut out = Vec::new();
+    // take(limit+1): переполнение детектим по длине, не аллоцируя саму бомбу.
     decoder
+        .take(limit.saturating_add(1))
         .read_to_end(&mut out)
         .map_err(|e| TransformError::InvalidInput {
             reason: format!("decompression failed: {e}"),
         })?;
+    if out.len() as u64 > limit {
+        return Err(TransformError::InvalidInput {
+            reason: format!(
+                "decompressed output exceeds {limit} bytes (possible decompression bomb)"
+            ),
+        });
+    }
     Ok(out)
 }
 
@@ -489,6 +507,34 @@ mod tests {
             .apply(Cow::Borrowed(b"bad zlib"), &serde_json::json!({}), &ctx)
             .unwrap_err();
         assert!(matches!(err2, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn decompress_bomb_rejected_without_allocating_it() {
+        use flate2::read::GzDecoder;
+        let ctx = NullExecutionContext;
+        let params = serde_json::json!({});
+        // 1 МБ нулей → ~1 КБ gzip: классическая бомба в миниатюре.
+        let zeros = vec![0u8; 1024 * 1024];
+        let bomb = GzipCompress
+            .apply(Cow::Borrowed(&zeros), &params, &ctx)
+            .unwrap()
+            .into_owned();
+        assert!(
+            bomb.len() < 64 * 1024,
+            "fixture must compress well, got {} bytes",
+            bomb.len()
+        );
+
+        // Лимит 1 КБ: отказ без попытки аллоцировать весь мегабайт.
+        let mut dec = GzDecoder::new(bomb.as_slice());
+        let err = decompress_limited(&mut dec, 1024).unwrap_err();
+        assert!(matches!(err, TransformError::InvalidInput { .. }));
+
+        // Щедрый лимит: та же бомба распаковывается корректно.
+        let mut dec = GzDecoder::new(bomb.as_slice());
+        let out = decompress_limited(&mut dec, 2 * 1024 * 1024).unwrap();
+        assert_eq!(out, zeros);
     }
 
     #[test]
