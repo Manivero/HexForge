@@ -401,13 +401,12 @@ pub struct RunNodeResponse {
     pub duration_ms: u64,
 }
 
-/// MVP-исполнитель одного узла: наивная рекурсия по графу без мемоизации
-/// промежуточных результатов и без чанкового стриминга — это заглушка,
-/// закрывающая контракт `run_node` для проверки моста и однопутевых
-/// (non-merge) рецептов. Полноценный планировщик с topo-order execution,
-/// кэшированием по `Snapshot::reproducibility_key()` и chunked streaming
-/// живёт в `hexforge-stream` (см. `04-RUST-CORE-ARCHITECTURE.md`, §6) и
-/// подключается сюда без изменения этого IPC-контракта.
+/// Исполнитель одного узла поверх планировщика `hexforge-engine`: рекурсивное
+/// исполнение входной цепочки через `scheduler::execute_chain` с memoization
+/// по `reproducibility_key`, chunked streaming для streamable-операций,
+/// merge-ветками через `MergeTransform` и кооперативной отменой.
+/// Каждый узел цепочки пишет Snapshot истории; при `preview_only=false`
+/// дополнительно прогреваются downstream-узлы для мгновенного превью.
 #[tauri::command]
 pub async fn run_node(
     req: RunNodeRequest,
