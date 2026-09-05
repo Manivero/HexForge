@@ -1118,6 +1118,11 @@ pub fn diff_snapshots(
     a: hexforge_core::SnapshotId,
     b: hexforge_core::SnapshotId,
 ) -> HexForgeResult<String> {
+    // Верхняя граница человекочитаемого diff-текста: без лимита diff двух
+    // больших выходов (до бюджетного лимита кэша каждый) давал бы сотни
+    // мегабайт по IPC и вешал UI. Обрезаем с явным маркером.
+    const MAX_DIFF_TEXT_BYTES: usize = 256 * 1024;
+    const DIFF_TRUNCATED_MARKER: &str = "… [diff truncated: outputs too large]\n";
     let out_a = replay_snapshot(state, a)?;
     let out_b = replay_snapshot(state, b)?;
     if out_a == out_b {
@@ -1130,7 +1135,13 @@ pub fn diff_snapshots(
     let mut out = String::new();
     out.push_str(&format!("--- snapshot {a}\n+++ snapshot {b}\n"));
     let max = lines_a.len().max(lines_b.len());
+    let mut truncated = false;
     for i in 0..max {
+        if out.len() >= MAX_DIFF_TEXT_BYTES {
+            out.push_str(DIFF_TRUNCATED_MARKER);
+            truncated = true;
+            break;
+        }
         match (lines_a.get(i), lines_b.get(i)) {
             (Some(la), Some(lb)) if la == lb => out.push_str(&format!(" {la}\n")),
             (Some(la), Some(lb)) => out.push_str(&format!("-{la}\n+{lb}\n")),
@@ -1139,7 +1150,7 @@ pub fn diff_snapshots(
             (None, None) => {}
         }
     }
-    if out.lines().count() <= 2 {
+    if !truncated && out.lines().count() <= 2 {
         // Бинарный fallback: первый различающийся байт
         let pos = out_a
             .iter()
@@ -1644,6 +1655,62 @@ mod tests {
         assert!(err
             .message
             .contains("no longer match the recorded input hash"));
+    }
+
+    #[test]
+    fn diff_small_outputs_have_no_truncation_marker() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let ra = root_node(&state, b"aaa\nbbb", "text.rot13");
+        let rb = root_node(&state, b"aaa\nccc", "text.rot13");
+        execute_chain(&state, &ra, &token(), &no_progress).unwrap();
+        execute_chain(&state, &rb, &token(), &no_progress).unwrap();
+        let history = state.history.read();
+        let snaps = history.ordered_snapshots();
+        let (sa, sb) = (snaps[0].id, snaps[1].id);
+
+        // Одинаковые выходы — короткий "equal".
+        assert_eq!(diff_snapshots(&state, sa, sa).unwrap(), "equal\n");
+
+        // Маленький построчный diff — полностью, без маркера обрезки
+        // (rot13: "aaa"→"nnn", "bbb"→"ooo", "ccc"→"ppp").
+        let diff = diff_snapshots(&state, sa, sb).unwrap();
+        assert!(
+            !diff.contains("diff truncated"),
+            "unexpected truncation:\n{diff}"
+        );
+        assert!(
+            diff.contains(" nnn\n-ooo\n+ppp\n"),
+            "unexpected diff:\n{diff}"
+        );
+    }
+
+    #[test]
+    fn diff_huge_outputs_is_truncated_with_marker() {
+        // ~430 КБ построчно различающихся выходов: полный построчный diff
+        // занял бы ~860 КБ — ожидаем обрезку с явным маркером.
+        let state = AppState::new(hexforge_ops::build_registry());
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        for i in 0..4000 {
+            a.extend_from_slice(format!("line {i:05} {} \n", "a".repeat(90)).as_bytes());
+            b.extend_from_slice(format!("line {i:05} {} \n", "b".repeat(90)).as_bytes());
+        }
+        let ra = root_node(&state, &a, "text.rot13");
+        let rb = root_node(&state, &b, "text.rot13");
+        execute_chain(&state, &ra, &token(), &no_progress).unwrap();
+        execute_chain(&state, &rb, &token(), &no_progress).unwrap();
+        let history = state.history.read();
+        let snaps = history.ordered_snapshots();
+        let diff = diff_snapshots(&state, snaps[0].id, snaps[1].id).unwrap();
+        assert!(
+            diff.contains("diff truncated"),
+            "huge diff must be truncated"
+        );
+        assert!(
+            diff.len() < 256 * 1024 + 4096,
+            "truncated diff too large: {} bytes",
+            diff.len()
+        );
     }
 
     fn rot13(data: &[u8]) -> Vec<u8> {
