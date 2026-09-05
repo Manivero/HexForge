@@ -1005,3 +1005,150 @@ fn e2e_cancel_parallel_pipeline_never_reports_partial_success() {
     assert!(out.starts_with(b"bm5u"));
     assert!(out.ends_with(b"bg=="));
 }
+
+#[test]
+fn e2e_history_large_evict_replay_verifies_hashes() {
+    // History под нагрузкой: 64 МиБ выходы не помещаются в 1 МиБ бюджет и
+    // никогда не кэшируются — restore идёт полным рекомпьютом из источника
+    // с послойной сверкой content-hash (успех = целостность доказана).
+    let len = 64 * E2E_MB;
+    let state = AppState::with_cache_budget(hexforge_ops::build_registry(), E2E_MB);
+    let n2 = large_pipeline(&state, vec![b'a'; len]);
+    let out = scheduler::execute_chain(&state, &n2, &token(), &no_progress).unwrap();
+    assert_eq!(out.len(), len.div_ceil(3) * 4);
+    let head = state.history.read().current.unwrap();
+    assert_eq!(
+        state.cache.lock().entries_len(),
+        0,
+        "over-budget outputs must not pollute the cache"
+    );
+
+    let replayed = scheduler::replay_snapshot(&state, head).unwrap();
+    assert_eq!(replayed.as_slice(), out.as_slice());
+}
+
+#[test]
+fn e2e_history_replay_after_source_patch_fails_integrity() {
+    // Целостность restore: правка байтов источника после снапшота обязана
+    // ронять replay ошибкой InvalidInput, а не молча отдавать новые байты.
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(vec![b'a'; E2E_MB]));
+    let nid = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: nid,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    scheduler::execute_chain(&state, &nid, &token(), &no_progress).unwrap();
+    let head = state.history.read().current.unwrap();
+
+    state.sources.write().write_region(&h, 0, b"ZZZZ").unwrap();
+    let err = scheduler::replay_snapshot(&state, head).unwrap_err();
+    assert_eq!(err.kind, HexForgeErrorKind::InvalidInput);
+    assert!(err.message.contains("no longer match"));
+}
+
+#[test]
+fn e2e_history_branching_from_shared_root() {
+    // Ветвление DAG: два разных потомка одного корня дают два lineage с общим
+    // префиксом; jump на старый head + повтор — дедупликация (узел не растёт).
+    // rot13("Hello") = "Uryyb" → hex начинается с "5572797962".
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"Hello".to_vec()));
+    let n1 = NodeId::new_v4();
+    let n2 = NodeId::new_v4();
+    let n3 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: n1,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    for (id, op) in [(n2, "encoding.base64.encode"), (n3, "encoding.hex.encode")] {
+        state.graph.write().insert_node(OperationNode {
+            id,
+            operation_id: op.into(),
+            operation_version: "1.0.0".into(),
+            params: serde_json::json!({}),
+            inputs: vec![n1],
+        });
+    }
+
+    scheduler::execute_chain(&state, &n2, &token(), &no_progress).unwrap();
+    let head_b64 = state.history.read().current.unwrap();
+    scheduler::execute_chain(&state, &n3, &token(), &no_progress).unwrap();
+    let head_hex = state.history.read().current.unwrap();
+    assert_ne!(head_b64, head_hex);
+
+    {
+        let history = state.history.read();
+        assert_eq!(history.order.len(), 3); // root + 2 ветки, без дублей
+        let lineage_hex: Vec<_> = history.lineage(head_hex).iter().map(|s| s.id).collect();
+        assert_eq!(lineage_hex.len(), 2);
+        let lineage_b64: Vec<_> = history.lineage(head_b64).iter().map(|s| s.id).collect();
+        assert_eq!(lineage_b64.len(), 2);
+        // Общий корень ветвления.
+        assert_eq!(lineage_hex[0], lineage_b64[0]);
+    }
+
+    // Обе ветки реплеятся независимо и корректно.
+    let hex_out = scheduler::replay_snapshot(&state, head_hex).unwrap();
+    assert!(hex_out.starts_with(b"5572797962"));
+    let b64_out = scheduler::replay_snapshot(&state, head_b64).unwrap();
+    assert_eq!(
+        b64_out.as_slice(),
+        base64::engine::general_purpose::STANDARD
+            .encode(b"Uryyb")
+            .as_bytes()
+    );
+
+    // Jump на старый head + повтор ветки: состояние уже есть → новый узел
+    // не создаётся, голова переезжает на существующий снапшот.
+    state.history.write().current = Some(head_b64);
+    scheduler::execute_chain(&state, &n3, &token(), &no_progress).unwrap();
+    {
+        let history = state.history.read();
+        assert_eq!(history.order.len(), 3);
+        assert_eq!(history.current, Some(head_hex));
+    }
+}
+
+#[test]
+fn e2e_history_rerun_identical_state_dedups() {
+    // FR-4.2 E2E: повтор идентичного прогона не плодит узлы DAG —
+    // история остаётся графом уникальных состояний.
+    let state = AppState::new(hexforge_ops::build_registry());
+    let h = state
+        .sources
+        .write()
+        .insert(SourceEntry::InMemory(b"Hello".to_vec()));
+    let n1 = NodeId::new_v4();
+    state.graph.write().insert_node(OperationNode {
+        id: n1,
+        operation_id: "text.rot13".into(),
+        operation_version: "1.0.0".into(),
+        params: serde_json::json!({ "sourceHandle": h.to_string() }),
+        inputs: vec![],
+    });
+    scheduler::execute_chain(&state, &n1, &token(), &no_progress).unwrap();
+    let (order_len, head) = {
+        let history = state.history.read();
+        (history.order.len(), history.current)
+    };
+    assert_eq!(order_len, 1);
+    scheduler::execute_chain(&state, &n1, &token(), &no_progress).unwrap();
+    {
+        let history = state.history.read();
+        assert_eq!(history.order.len(), order_len);
+        assert_eq!(history.current, head);
+    }
+}
