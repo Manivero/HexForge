@@ -27,7 +27,8 @@ const MAX_PLUGIN_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
 /// WIT contract identity plug-in developers target.
 /// Must stay in sync with `wit/plugin.wit` (`package …` line) and the
-/// `hexforge:plugin/transform/*` export names used in `try_get_wit_metadata`.
+/// `hexforge:plugin/transform` instance export whose funcs (`get-id`, …,
+/// `apply`) are resolved via `iface_typed_func`.
 /// Bump on any breaking WIT change; host rejects components built for an
 /// unknown package with an explicit error instead of a bare trap.
 pub const WIT_PACKAGE: &str = "hexforge:plugin";
@@ -394,15 +395,19 @@ impl PluginRuntime {
                 )))
             }
         })?;
-        // The WIT `apply` is exported as `hexforge:plugin/transform/apply` with signature ([u8], string) -> result<list<u8>, string>
-        // We try to get it as a typed func; if not found, fallback to core module.
-        let func = instance
-            .get_typed_func::<(&[u8], &str), (Result<Vec<u8>, String>,)>(&mut store, "hexforge:plugin/transform/apply")
-            .map_err(|_| {
-                anyhow!(PluginError::WasmtimeError(
-                    "component does not export hexforge:plugin/transform/apply — fallback to core module".into(),
-                ))
-            })?;
+        // The WIT `apply` is exported as `apply` of the `hexforge:plugin/transform`
+        // instance export, with signature ([u8], string) -> result<list<u8>, string>.
+        // (wasmtime needs the two-step instance/func lookup — see `iface_typed_func`.)
+        let func = PluginTransform::iface_typed_func::<(&[u8], &str), (Result<Vec<u8>, String>,)>(
+            &instance,
+            &mut store,
+            "apply",
+        )
+        .map_err(|_| {
+            anyhow!(PluginError::WasmtimeError(
+                "component does not export hexforge:plugin/transform/apply — fallback to core module".into(),
+            ))
+        })?;
         let (result,): (Result<Vec<u8>, String>,) =
             func.call(&mut store, (input, params_json)).map_err(|e| {
                 if Self::is_fuel_exhaustion(&e) {
@@ -671,6 +676,33 @@ impl PluginTransform {
         )
     }
 
+    /// WIT interface all host lookups target.
+    const TRANSFORM_IFACE: &'static str = "hexforge:plugin/transform";
+
+    /// Typed lookup of `func` inside the `hexforge:plugin/transform` instance
+    /// export. wasmtime resolves only top-level names from a path string, so
+    /// the flat `"iface/func"` form never matches: resolve the instance first,
+    /// then the func inside it (see `Instance::get_func` docs).
+    fn iface_typed_func<Params, Results>(
+        inst: &wasmtime::component::Instance,
+        store: &mut Store<HostState>,
+        func: &str,
+    ) -> Result<wasmtime::component::TypedFunc<Params, Results>>
+    where
+        Params: wasmtime::component::ComponentNamedList + wasmtime::component::Lower,
+        Results: wasmtime::component::ComponentNamedList + wasmtime::component::Lift,
+    {
+        let full = format!("{}/{func}", Self::TRANSFORM_IFACE);
+        let iface_idx = inst
+            .get_export_index(&mut *store, None, Self::TRANSFORM_IFACE)
+            .ok_or_else(|| Self::wit_export_error(&full))?;
+        let func_idx = inst
+            .get_export_index(&mut *store, Some(&iface_idx), func)
+            .ok_or_else(|| Self::wit_export_error(&full))?;
+        inst.get_typed_func(&mut *store, func_idx)
+            .map_err(|_| Self::wit_export_error(&full))
+    }
+
     fn try_get_wit_metadata(
         runtime: &PluginRuntime,
         instance: &PluginInstance,
@@ -709,43 +741,38 @@ impl PluginTransform {
             )))
         })?;
         // Try to call WIT getters via typed funcs; if any fail, fallback to manifest
-        let get_id = inst
-            .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-id")
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-id"))?;
+        let get_id =
+            PluginTransform::iface_typed_func::<(), (String,)>(&inst, &mut store, "get-id")?;
         let (id,): (String,) = get_id
             .call(&mut store, ())
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-id trap: {e}"))))?;
-        let get_version = inst
-            .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-version")
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-version"))?;
+        let get_version =
+            PluginTransform::iface_typed_func::<(), (String,)>(&inst, &mut store, "get-version")?;
         let (version,): (String,) = get_version
             .call(&mut store, ())
             .map_err(|e| anyhow!(PluginError::WasmtimeError(format!("get-version trap: {e}"))))?;
-        let get_display = inst
-            .get_typed_func::<(), (String,)>(
-                &mut store,
-                "hexforge:plugin/transform/get-display-name",
-            )
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-display-name"))?;
+        let get_display = PluginTransform::iface_typed_func::<(), (String,)>(
+            &inst,
+            &mut store,
+            "get-display-name",
+        )?;
         let (display_name,): (String,) = get_display.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-display-name trap: {e}"
             )))
         })?;
-        let get_category = inst
-            .get_typed_func::<(), (String,)>(&mut store, "hexforge:plugin/transform/get-category")
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-category"))?;
+        let get_category =
+            PluginTransform::iface_typed_func::<(), (String,)>(&inst, &mut store, "get-category")?;
         let (category,): (String,) = get_category.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-category trap: {e}"
             )))
         })?;
-        let get_schema = inst
-            .get_typed_func::<(), (String,)>(
-                &mut store,
-                "hexforge:plugin/transform/get-params-schema",
-            )
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-params-schema"))?;
+        let get_schema = PluginTransform::iface_typed_func::<(), (String,)>(
+            &inst,
+            &mut store,
+            "get-params-schema",
+        )?;
         let (schema_str,): (String,) = get_schema.call(&mut store, ()).map_err(|e| {
             anyhow!(PluginError::WasmtimeError(format!(
                 "get-params-schema trap: {e}"
@@ -753,12 +780,11 @@ impl PluginTransform {
         })?;
         let params_schema: serde_json::Value =
             serde_json::from_str(&schema_str).unwrap_or(serde_json::json!({}));
-        let get_caps = inst
-            .get_typed_func::<(), ((bool, bool, String),)>(
-                &mut store,
-                "hexforge:plugin/transform/get-capabilities",
-            )
-            .map_err(|_| Self::wit_export_error("hexforge:plugin/transform/get-capabilities"))?;
+        let get_caps = PluginTransform::iface_typed_func::<(), ((bool, bool, String),)>(
+            &inst,
+            &mut store,
+            "get-capabilities",
+        )?;
         let ((deterministic, streamable, memory_cost_str),): ((bool, bool, String),) =
             get_caps.call(&mut store, ()).map_err(|e| {
                 anyhow!(PluginError::WasmtimeError(format!(
