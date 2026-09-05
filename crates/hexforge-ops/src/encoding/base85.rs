@@ -53,26 +53,18 @@ fn encode_base85(data: &[u8]) -> String {
 }
 
 fn decode_base85(s: &str) -> Result<Vec<u8>, String> {
-    // Filter whitespace, handle 'z'
+    // Filter whitespace, handle 'z' (только на границе групп: внутри группы
+    // 'z' сдвинул бы выравнивание и дал тихо неверные байты вместо ошибки).
     let mut filtered = String::new();
     for c in s.chars() {
         if c.is_ascii_whitespace() {
             continue;
         }
         if c == 'z' {
-            // 'z' must stand alone as group of 4 zeros; expand to 5 '!' (which decodes to zeros) then handle via normal path
-            // But we expand directly to bytes
-            // For simplicity, we treat 'z' as 4 zero bytes directly in output,
-            // but to keep group handling uniform, we expand to "!!!!!" which decodes to 0
-            // Instead, we handle 'z' by directly pushing 4 zeros and continuing
-            // However we need to ensure it's not inside a 5-char group
-            // So we flush any pending partial? In Ascii85, 'z' only appears where a 5-char group would be
-            // We handle by checking filtered length %5 ==0 before 'z' is added
-            // Simplify: if we encounter 'z', it replaces a full 5-char group
-            // We can just directly output 4 zeros if we're at group boundary
-            // For now, we require 'z' to be at group boundary (filtered len %5 ==0 before push)
-            // But we handle by expanding to 4 zeros directly via special handling outside this loop?
-            // Instead, we will expand 'z' to "!!!!!" in filtered string, then normal decode will produce 4 zeros
+            if filtered.len() % 5 != 0 {
+                return Err("'z' shortcut is only valid at group boundary".into());
+            }
+            // 'z' = 4 нулевых байта; "!!!!!" декодируется ровно в них.
             filtered.push_str("!!!!!");
         } else {
             filtered.push(c);
@@ -109,13 +101,20 @@ fn decode_base85(s: &str) -> Result<Vec<u8>, String> {
         if chunk.len() != 5 {
             return Err("invalid chunk length".into());
         }
-        let mut n: u32 = 0;
+        // Аккумулятор u64: максимальный кортеж "uuuuu" (= 4437053124)
+        // не влезает в u32 — раньше это была паника overflow в debug
+        // и молчаливая обёртка в release. Всё сверх u32::MAX — invalid input.
+        let mut n: u64 = 0;
         for &c in chunk {
             if !(33..=117).contains(&c) {
                 return Err(format!("invalid char {}", c as char));
             }
-            n = n * 85 + (c - 33) as u32;
+            n = n * 85 + (c - 33) as u64;
         }
+        if n > u32::MAX as u64 {
+            return Err(format!("base85 tuple overflows 32 bits: {n}"));
+        }
+        let n = n as u32;
         // n is 32-bit value, split to 4 bytes
         out.push((n >> 24) as u8);
         out.push((n >> 16) as u8);
@@ -290,6 +289,43 @@ mod tests {
         let ctx = NullExecutionContext;
         let err = Base85Decode
             .apply(Cow::Borrowed(b"\xFF\xFE"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn rejects_overflow_tuple() {
+        // "uuuuu" = 4437053124 > u32::MAX: обязан быть InvalidInput,
+        // а не паникой overflow (debug) / молчаливой обёрткой (release).
+        let ctx = NullExecutionContext;
+        let err = Base85Decode
+            .apply(Cow::Borrowed(b"uuuuu"), &serde_json::json!({}), &ctx)
+            .unwrap_err();
+        assert!(matches!(err, TransformError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn max_valid_tuple_decodes() {
+        // Полный кортеж 0xFFFFFFFF обязан декодироваться (защита от
+        // чрезмерно строгого отклонения после фикса переполнения).
+        let ctx = NullExecutionContext;
+        let enc = Base85Encode
+            .apply(Cow::Borrowed(&[0xFF; 4]), &serde_json::json!({}), &ctx)
+            .unwrap();
+        assert_eq!(enc.as_ref().len(), 5);
+        let dec = Base85Decode
+            .apply(enc, &serde_json::json!({}), &ctx)
+            .unwrap();
+        assert_eq!(dec.as_ref(), &[0xFF; 4]);
+    }
+
+    #[test]
+    fn rejects_z_inside_group() {
+        // 'z' допустим только на границе групп: внутри группы он бы тихо
+        // сдвинул выравнивание и выдал неверные байты вместо ошибки.
+        let ctx = NullExecutionContext;
+        let err = Base85Decode
+            .apply(Cow::Borrowed(b"abzcd"), &serde_json::json!({}), &ctx)
             .unwrap_err();
         assert!(matches!(err, TransformError::InvalidInput { .. }));
     }
