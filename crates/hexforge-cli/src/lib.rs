@@ -143,7 +143,14 @@ pub fn run_recipe(
             };
             let existing = { state.graph.read().nodes.get(root_id).cloned() };
             if let Some(mut node) = existing {
-                node.params = json!({ "sourceHandle": handle.to_string() });
+                // Сохраняем собственные params корня (напр. alphabet у
+                // base64.decode) — добавляем только sourceHandle, как и
+                // GUI через bindSourceHandle (src/lib/graphMutate.ts).
+                if node.params.is_object() {
+                    node.params["sourceHandle"] = json!(handle.to_string());
+                } else {
+                    node.params = json!({ "sourceHandle": handle.to_string() });
+                }
                 state.graph.write().insert_node(node);
             }
         }

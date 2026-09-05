@@ -1,6 +1,6 @@
 // Чистые мутации Node Graph (без zustand/tauri) — покрытие node:test.
 
-import type { NodeId, OperationNodeDto } from "./ipc-contract";
+import type { NodeId, OperationNodeDto, SourceHandle } from "./ipc-contract";
 
 export interface RemoveResult {
   nodes: Record<string, OperationNodeDto>;
@@ -55,4 +55,27 @@ export function removeNode(nodes: Record<string, OperationNodeDto>, id: NodeId):
 /** Пустой граф — утилита для кнопки Clear. */
 export function emptyGraph(): Record<string, never> {
   return {};
+}
+
+/**
+ * Привязывает байтовый источник к корневому узлу, СОХРАНЯЯ его собственные
+ * params операции (напр. alphabet у base64.decode) — перезаписывается только
+ * ключ sourceHandle. Неизвестный корень → null (привязки нет).
+ * Входной record не мутируется; незатронутые узлы shared by reference.
+ */
+export function bindSourceHandle(
+  nodes: Record<string, OperationNodeDto>,
+  rootId: NodeId,
+  handle: SourceHandle,
+): Record<string, OperationNodeDto> | null {
+  const root = nodes[rootId];
+  if (!root) return null;
+  const prev =
+    root.params !== null && typeof root.params === "object" && !Array.isArray(root.params)
+      ? (root.params as Record<string, unknown>)
+      : {};
+  return {
+    ...nodes,
+    [rootId]: { ...root, params: { ...prev, sourceHandle: handle } },
+  };
 }

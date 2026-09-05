@@ -34,7 +34,7 @@ import type {
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 import { hexPairsToBytes } from "@/lib/bytes";
 import { findRootId } from "@/lib/graphWalk";
-import { removeNode } from "@/lib/graphMutate";
+import { bindSourceHandle, removeNode } from "@/lib/graphMutate";
 import { t } from "@/lib/i18n";
 
 export type Theme = "dark" | "light";
@@ -291,13 +291,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (rootId === null) {
       return false;
     }
-    const root = nodes[rootId];
-    if (!root) {
+    // Привязка сохраняет собственные params корня (bindSourceHandle),
+    // перезаписывается только sourceHandle.
+    const bound = bindSourceHandle(nodes, rootId, sourceHandle);
+    if (!bound) {
       return false;
     }
-    set({
-      nodes: { ...nodes, [rootId]: { ...root, params: { sourceHandle } } },
-    });
+    set({ nodes: bound });
     scheduleBackendSync(get());
     return true;
   },

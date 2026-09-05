@@ -246,3 +246,39 @@ fn run_recipe_multi_source_mismatched_in_count_rejected() {
     .unwrap_err();
     assert!(err2.contains("must be 1 or match number of source nodes"));
 }
+
+#[test]
+fn run_recipe_preserves_root_params_when_binding_source() {
+    use hexforge_engine::graph_dto::OperationNodeDto;
+    let dir = temp_dir();
+    let root_id = NodeId::new_v4();
+
+    // Корень base64.decode с собственным params alphabet=url_safe: биндинг
+    // --in обязан ДОБАВИТЬ sourceHandle, а не затереть params целиком —
+    // иначе стандартный алфавит отвергнет "-_8=" как InvalidInput.
+    let nodes = json!({
+        root_id.to_string(): OperationNodeDto {
+            id: root_id.to_string(),
+            operation_id: "encoding.base64.decode".into(),
+            operation_version: "1.0.0".into(),
+            params: json!({ "alphabet": "url_safe" }),
+            inputs: vec![],
+        }
+    });
+
+    let recipe = write(&dir, "recipe.hexforge", recipe_json(nodes).as_bytes());
+    let input = write(&dir, "in.bin", b"-_8=");
+    let out = dir.join("out.bin");
+
+    let summary = hexforge_cli::run_recipe(
+        recipe.to_str().unwrap(),
+        &[input.to_str().unwrap().to_string()],
+        out.to_str().unwrap(),
+    )
+    .expect("url-safe base64 must decode when alphabet param is preserved");
+
+    // "-_8=" в url_safe-алфавите = байты [0xFB, 0xFF].
+    assert_eq!(summary.executed_nodes, 1);
+    assert_eq!(summary.output_bytes, 2);
+    assert_eq!(std::fs::read(&out).unwrap(), vec![0xFB, 0xFF]);
+}

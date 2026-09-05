@@ -1,7 +1,7 @@
 // Юнит-тесты мутаций графа (removeNode с «мостом») — скомпилированный артефакт.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { removeNode } from "../.fe-build/graphMutate.js";
+import { bindSourceHandle, removeNode } from "../.fe-build/graphMutate.js";
 
 function mk(id, inputs) {
   return { id, operationId: `op.${id}`, operationVersion: "1.0.0", params: {}, inputs };
@@ -60,4 +60,34 @@ test("удаление merge-узла мостит всех родителей (
   // Ребёнок d имел [m], m имел [a,b] → после удаления d должен иметь [a,b] (оба родителя)
   assert.deepEqual(new Set(res.nodes.d.inputs), new Set(["a", "b"]));
   assert.equal(res.nodes.m, undefined);
+});
+
+test("bindSourceHandle добавляет handle, сохраняя собственные params корня", () => {
+  const root = mk("r", []);
+  root.params = { alphabet: "url_safe" };
+  const nodes = { r: root, x: mk("x", ["r"]) };
+  const bound = bindSourceHandle(nodes, "r", "handle-1");
+  assert.deepEqual(bound.r.params, { alphabet: "url_safe", sourceHandle: "handle-1" });
+  // Вход не мутирован, соседи — те же объекты.
+  assert.deepEqual(nodes.r.params, { alphabet: "url_safe" });
+  assert.equal(bound.x, nodes.x);
+});
+
+test("bindSourceHandle перезаписывает только sourceHandle при повторной привязке", () => {
+  const root = mk("r", []);
+  root.params = { alphabet: "url_safe", sourceHandle: "old" };
+  const bound = bindSourceHandle({ r: root }, "r", "new");
+  assert.deepEqual(bound.r.params, { alphabet: "url_safe", sourceHandle: "new" });
+});
+
+test("bindSourceHandle заменяет не-объектные params на { sourceHandle }", () => {
+  const root = mk("r", []);
+  root.params = "мусор";
+  const bound = bindSourceHandle({ r: root }, "r", "h");
+  assert.deepEqual(bound.r.params, { sourceHandle: "h" });
+});
+
+test("bindSourceHandle на неизвестном корне возвращает null", () => {
+  const nodes = { a: mk("a", []) };
+  assert.equal(bindSourceHandle(nodes, "nope", "h"), null);
 });
