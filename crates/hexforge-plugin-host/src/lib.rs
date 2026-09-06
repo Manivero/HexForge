@@ -9,6 +9,8 @@
 //! - Lifecycle: Engine cached per Runtime, Store per execution, trap/fuel isolation (NFR-9)
 //! - Integration tests with real WASM plugins (WAT components)
 
+pub mod store;
+
 use anyhow::{anyhow, Context, Result};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use hexforge_core::{
@@ -16,6 +18,7 @@ use hexforge_core::{
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
@@ -49,6 +52,14 @@ pub struct PluginManifest {
     pub name: String,
     pub version: String,
     pub author: String,
+    /// Lowercase hex hash of the exact `plugin.wasm` bytes the manifest was
+    /// signed for. `None` = legacy manifest without artifact binding (tolerated
+    /// by the flat dev-discovery path); the persistent package layer
+    /// (`store::PluginLibrary`) REQUIRES `Some` and rejects the package when
+    /// the on-disk WASM no longer matches — otherwise a post-install `.wasm`
+    /// swap would be undetectable (signature covers the manifest only).
+    #[serde(default)]
+    pub wasm_sha256: Option<String>,
     #[serde(default)]
     pub requested_capabilities: Vec<String>,
     #[serde(default)]
@@ -1118,6 +1129,36 @@ pub fn sign_manifest(manifest_bytes: &[u8], signing_key_hex: &str) -> Result<Str
     Ok(hex::encode(signing_key.sign(manifest_bytes).to_bytes()))
 }
 
+/// Developer SDK: binds a WASM artifact to its manifest BEFORE signing.
+///
+/// Writes the lowercase-hex SHA-256 of `wasm_bytes` into the manifest's
+/// `wasm_sha256` field and re-serializes (pretty JSON + trailing newline).
+/// The persistent install/discovery layer ([`store::PluginLibrary`])
+/// REQUIRES this binding and re-checks it on every scan: without it a
+/// post-install `.wasm` swap would be invisible, because the Ed25519
+/// signature covers the manifest bytes only.
+///
+/// Workflow: author manifest → `bind` → [`sign_manifest`] the EXACT bytes
+/// written → ship manifest + wasm + sidecars. Re-binding after ANY manifest
+/// edit; the old signature is void once the bytes change.
+pub fn bind_wasm_artifact(
+    manifest_bytes: &[u8],
+    wasm_bytes: &[u8],
+) -> Result<Vec<u8>, PluginError> {
+    let mut value: serde_json::Value = serde_json::from_slice(manifest_bytes)
+        .map_err(|e| PluginError::ManifestParse(format!("manifest JSON invalid: {e}")))?;
+    let obj = value
+        .as_object_mut()
+        .ok_or_else(|| PluginError::InvalidManifest("manifest must be a JSON object".into()))?;
+    let digest = hex::encode(Sha256::digest(wasm_bytes));
+    obj.insert("wasm_sha256".to_string(), serde_json::Value::String(digest));
+    let mut out = serde_json::to_string_pretty(&value).map_err(|e| {
+        PluginError::InvalidManifest(format!("cannot re-serialize bound manifest: {e}"))
+    })?;
+    out.push('\n');
+    Ok(out.into_bytes())
+}
+
 /// Developer SDK: validates manifest semantics beyond JSON shape.
 ///
 /// Checks presence, `id` charset (`[a-z0-9._-]`, non-empty), strict
@@ -1283,6 +1324,28 @@ mod tests {
     }
 
     #[test]
+    fn bind_wasm_artifact_then_sign_verifies() {
+        let manifest = br#"{"id":"acme.uppercase","name":"Acme Uppercase","version":"1.0.0","author":"Acme","requested_capabilities":[],"granted_capabilities":[]}"#;
+        let wasm = b"\0asm-bind-fixture";
+        let bound = bind_wasm_artifact(manifest, wasm).unwrap();
+        let parsed: PluginManifest = serde_json::from_slice(&bound).unwrap();
+        let expected = hex::encode(sha2::Sha256::digest(wasm));
+        assert_eq!(parsed.wasm_sha256.as_deref(), Some(expected.as_str()));
+
+        // Sign the BOUND bytes: install accepts them.
+        let (pubkey_hex, signing_key_hex) = generate_keypair();
+        let sig_hex = sign_manifest(&bound, &signing_key_hex).unwrap();
+        assert!(verify_signature(&bound, &sig_hex, &pubkey_hex).unwrap());
+
+        // A swapped artifact no longer matches the signed binding.
+        let swapped = hex::encode(sha2::Sha256::digest(b"\0asm-tampered"));
+        assert_ne!(swapped, expected);
+
+        // Non-object JSON is rejected, not silently passed through.
+        assert!(bind_wasm_artifact(b"[1,2]", wasm).is_err());
+    }
+
+    #[test]
     fn rejects_malformed_keys() {
         let err = verify_signature(b"msg", "00", "00").unwrap_err();
         assert!(matches!(
@@ -1298,6 +1361,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Acme".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         }
     }
@@ -1471,6 +1535,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let dir = std::env::temp_dir();
@@ -1498,6 +1563,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let dir = std::env::temp_dir();
@@ -1532,6 +1598,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let dir = std::env::temp_dir();
@@ -1559,6 +1626,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec![],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path2.to_string_lossy().into_owned(),
@@ -1579,6 +1647,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec!["network".into()],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let mut inst = PluginInstance {
@@ -1643,6 +1712,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let instance = PluginInstance {
@@ -1668,6 +1738,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let instance2 = PluginInstance {
@@ -1725,6 +1796,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let instance = PluginInstance {
@@ -1775,6 +1847,7 @@ mod tests {
                     version: "1.0.0".into(),
                     author: "Test".into(),
                     requested_capabilities: vec![],
+                    wasm_sha256: None,
                     granted_capabilities: vec![],
                 },
                 wasm_path: wasm_path.to_string_lossy().into_owned(),
@@ -1816,6 +1889,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec![],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path.to_string_lossy().into_owned(),
@@ -1837,6 +1911,7 @@ mod tests {
             version: "2.3.4".into(),
             author: "Tester".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let dir = std::env::temp_dir();
@@ -1891,6 +1966,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec![],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path.to_string_lossy().into_owned(),
@@ -1916,6 +1992,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec![],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path2.to_string_lossy().into_owned(),
@@ -1971,6 +2048,7 @@ mod tests {
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         };
         let instance = PluginInstance {
@@ -2016,6 +2094,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec!["network".into()],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path.to_string_lossy().into_owned(),
@@ -2042,6 +2121,7 @@ mod tests {
                 version: "1.0.0".into(),
                 author: "Test".into(),
                 requested_capabilities: vec![],
+                wasm_sha256: None,
                 granted_capabilities: vec![],
             },
             wasm_path: wasm_path_loop.to_string_lossy().into_owned(),

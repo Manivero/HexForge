@@ -115,14 +115,24 @@ export function PluginPanel() {
       ) : (
         <ol className="flex max-h-56 flex-col gap-1.5 overflow-y-auto">
           {plugins.map((plugin) => {
+            // Бейдж — только по backend-вердикту; grant/revoke доступны лишь
+            // verified (остальные бэкенд всё равно отклонит fail-closed).
             const status = pluginStatus(plugin);
-            const invalid = status === "invalid-signature";
+            const verified = status === "verified";
+            const statusLabel =
+              status === "verified"
+                ? t(locale, "plugins.signatureValid")
+                : status === "invalid"
+                  ? t(locale, "plugins.signatureInvalid")
+                  : status === "unavailable"
+                    ? t(locale, "plugins.statusUnavailable")
+                    : t(locale, "plugins.statusIncompatible");
             return (
               <li
                 key={plugin.id}
                 className={[
                   "rounded-md border px-2 py-1.5",
-                  invalid ? "border-status-error" : "border-border-default",
+                  !verified ? "border-status-error" : "border-border-default",
                 ].join(" ")}
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-1">
@@ -138,22 +148,22 @@ export function PluginPanel() {
                   <span
                     className={[
                       "rounded px-1.5 py-0.5 font-mono text-2xs",
-                      invalid
-                        ? "bg-status-error text-text-primary"
-                        : "bg-surface-2 text-text-muted",
+                      verified
+                        ? "bg-surface-2 text-text-muted"
+                        : "bg-status-error text-text-primary",
                     ].join(" ")}
                     title={plugin.author}
                   >
-                    {invalid
-                      ? t(locale, "plugins.signatureInvalid")
-                      : t(locale, "plugins.signatureValid")}
+                    {statusLabel}
                   </span>
-                  <CapabilityChips
-                    plugin={plugin}
-                    locale={locale}
-                    onGrant={(cap) => void grantPluginCapability(plugin.id, cap)}
-                    onRevoke={(cap) => void revokePluginCapability(plugin.id, cap)}
-                  />
+                  {verified && (
+                    <CapabilityChips
+                      plugin={plugin}
+                      locale={locale}
+                      onGrant={(cap) => void grantPluginCapability(plugin.id, cap)}
+                      onRevoke={(cap) => void revokePluginCapability(plugin.id, cap)}
+                    />
+                  )}
                 </div>
               </li>
             );

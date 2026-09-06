@@ -12,11 +12,18 @@ export const KNOWN_CAPABILITIES: readonly PluginCapability[] = [
   "network",
 ];
 
-/** Состояния строки плагина, которые обязан различимо показать UI. */
-export type PluginStatusKind = "valid" | "invalid-signature";
+/** Состояния строки плагина — зеркало backend-вердикта discovery
+ * (`PluginStatus`): только `verified` регистрируется и исполняется. */
+export type PluginStatusKind = "verified" | "invalid" | "unavailable" | "incompatible";
+
+const KNOWN_STATUSES: readonly string[] = ["verified", "invalid", "unavailable", "incompatible"];
 
 export function pluginStatus(plugin: PluginManifestDto): PluginStatusKind {
-  return plugin.signatureValid ? "valid" : "invalid-signature";
+  if ((KNOWN_STATUSES as readonly string[]).includes(plugin.status)) {
+    return plugin.status as PluginStatusKind;
+  }
+  // Legacy fallback, пока бэкенд не отдаёт `status`.
+  return plugin.signatureValid ? "verified" : "invalid";
 }
 
 export function isGranted(plugin: PluginManifestDto, capability: PluginCapability): boolean {

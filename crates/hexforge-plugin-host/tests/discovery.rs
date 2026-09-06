@@ -20,6 +20,7 @@ fn example_manifest(id: &str) -> PluginManifest {
         version: "1.0.0".into(),
         author: "HexForge Example".into(),
         requested_capabilities: vec![],
+        wasm_sha256: None,
         granted_capabilities: vec![],
     }
 }

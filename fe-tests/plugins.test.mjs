@@ -22,15 +22,23 @@ function dto(overrides = {}) {
     category: "Plugin",
     author: "HexForge",
     signatureValid: true,
+    status: "verified",
     requestedCapabilities: ["filesystem_read", "network"],
     grantedCapabilities: [],
     ...overrides,
   };
 }
 
-test("pluginStatus различает valid / invalid-signature", () => {
-  assert.equal(pluginStatus(dto()), "valid");
-  assert.equal(pluginStatus(dto({ signatureValid: false })), "invalid-signature");
+test("pluginStatus — зеркало backend-вердикта verified/invalid/unavailable/incompatible", () => {
+  assert.equal(pluginStatus(dto()), "verified");
+  assert.equal(pluginStatus(dto({ status: "invalid", signatureValid: false })), "invalid");
+  assert.equal(pluginStatus(dto({ status: "unavailable", signatureValid: false })), "unavailable");
+  assert.equal(
+    pluginStatus(dto({ status: "incompatible", signatureValid: false })),
+    "incompatible",
+  );
+  // Legacy fallback, пока бэкенд не отдаёт `status`.
+  assert.equal(pluginStatus(dto({ status: undefined, signatureValid: false })), "invalid");
 });
 
 test("pending/active делят requested по факту гранта", () => {
@@ -103,6 +111,9 @@ test("PluginPanel: список, подпись, capabilities, install/discovery
     "plugin.id",
     "signatureValid",
     "plugins.signatureInvalid",
+    "plugins.statusUnavailable",
+    "plugins.statusIncompatible",
+    "statusLabel",
     "pendingCapabilities",
     "activeCapabilities",
     "installPluginFromPaths",
@@ -130,8 +141,9 @@ test("ipc: install/grant/revoke вызывают свои Tauri-команды",
   assert.ok(src.includes(`"revoke_capability"`), "revokeCapability must call revoke_capability");
 });
 
-test("контракт: PluginManifestDto несёт displayName/category", () => {
+test("контракт: PluginManifestDto несёт displayName/category/status", () => {
   const src = readFileSync(new URL("../src/lib/ipc-contract.ts", import.meta.url), "utf-8");
   assert.ok(src.includes("displayName: string"), "contract must carry displayName");
   assert.ok(src.includes("category: string"), "contract must carry category");
+  assert.ok(src.includes("status: PluginStatus"), "contract must carry backend verdict status");
 });

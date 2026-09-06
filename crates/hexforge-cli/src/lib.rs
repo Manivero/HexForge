@@ -254,3 +254,29 @@ pub fn plugin_validate_manifest(manifest_path: &str) -> Result<String, String> {
         manifest.id, manifest.version
     ))
 }
+
+/// Plugin SDK: binds `plugin.wasm` to `manifest.json` BEFORE signing.
+///
+/// Writes the artifact's SHA-256 into the manifest's `wasm_sha256` field
+/// (file rewritten in place, pretty JSON). Sign the resulting bytes with
+/// `plugin sign`: install and every later discovery re-verify the binding,
+/// so a post-install `.wasm` swap fails closed instead of going unnoticed.
+pub fn plugin_bind_artifact(manifest_path: &str, wasm_path: &str) -> Result<String, String> {
+    validate_cli_path(manifest_path, "manifest")?;
+    validate_cli_path(wasm_path, "wasm")?;
+    let manifest_bytes = std::fs::read(manifest_path)
+        .map_err(|e| format!("cannot read manifest '{manifest_path}': {e}"))?;
+    let wasm_bytes =
+        std::fs::read(wasm_path).map_err(|e| format!("cannot read wasm '{wasm_path}': {e}"))?;
+    let bound = hexforge_plugin_host::bind_wasm_artifact(&manifest_bytes, &wasm_bytes)
+        .map_err(|e| format!("cannot bind '{wasm_path}' into '{manifest_path}': {e}"))?;
+    std::fs::write(manifest_path, &bound)
+        .map_err(|e| format!("cannot write bound manifest '{manifest_path}': {e}"))?;
+    let manifest: hexforge_plugin_host::PluginManifest = serde_json::from_slice(&bound)
+        .map_err(|e| format!("bound manifest failed to parse (bug): {e}"))?;
+    Ok(format!(
+        "bound: id={} wasm_sha256={}",
+        manifest.id,
+        manifest.wasm_sha256.unwrap_or_default()
+    ))
+}

@@ -288,6 +288,7 @@ fn e2e_plugin_host_via_transform() {
         version: "1.0.0".into(),
         author: "Test".into(),
         requested_capabilities: vec![],
+        wasm_sha256: None,
         granted_capabilities: vec![],
     };
     let instance = hexforge_plugin_host::PluginInstance {
@@ -345,6 +346,7 @@ fn e2e_wit_component_via_scheduler() {
         version: "9.9.9".into(),
         author: "Test".into(),
         requested_capabilities: vec![],
+        wasm_sha256: None,
         granted_capabilities: vec![],
     };
     let instance = hexforge_plugin_host::PluginInstance {
@@ -406,6 +408,7 @@ fn e2e_plugin_fixture(
             version: "1.0.0".into(),
             author: "Test".into(),
             requested_capabilities: vec![],
+            wasm_sha256: None,
             granted_capabilities: vec![],
         },
         wasm_path: wasm_path.to_string_lossy().into_owned(),

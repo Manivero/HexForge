@@ -201,6 +201,9 @@ export interface ImportCyberChefRecipeResponse {
 // ---------- plugins ----------
 export type PluginCapability = "filesystem_read" | "filesystem_write" | "network";
 
+/** Backend-owned discovery verdict (commands::PluginManifestDto `status`). */
+export type PluginStatus = "verified" | "invalid" | "unavailable" | "incompatible";
+
 export interface PluginManifestDto {
   id: PluginId;
   /** Backend-owned display name (manifest `name`; WIT `get-display-name`
@@ -212,6 +215,8 @@ export interface PluginManifestDto {
   category: string;
   author: string;
   signatureValid: boolean;
+  /** Fail-closed discovery verdict — единственный источник статуса в UI. */
+  status: PluginStatus;
   requestedCapabilities: PluginCapability[];
   grantedCapabilities: PluginCapability[];
 }

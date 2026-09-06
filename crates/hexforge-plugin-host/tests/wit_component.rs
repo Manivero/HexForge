@@ -45,6 +45,7 @@ fn fallback_manifest() -> PluginManifest {
         version: "9.9.9".into(),
         author: "Test".into(),
         requested_capabilities: vec![],
+        wasm_sha256: None,
         granted_capabilities: vec![],
     }
 }

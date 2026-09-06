@@ -11,7 +11,7 @@ Files:
 - `manifest.json` — plugin identity + capabilities for the install request.
 - `Cargo.toml` — standalone crate (`cdylib`), detached from the HexForge workspace.
 
-## Full lifecycle: create → build → sign → manifest → install → grant → execute
+## Full lifecycle: create → build → validate → bind → sign → install → grant → execute
 
 Prerequisites: Rust with the `wasm32-wasip1` target, `wasm-tools`, and a `hexforge-cli`
 binary from this repo.
@@ -32,7 +32,11 @@ wasm-tools component new target/wasm32-wasip1/release/hexforge_example_wit.wasm 
 hexforge-cli plugin validate manifest.json
 # OK: manifest valid: id=example.wit-uppercase version=1.0.0
 
-# 4. Keygen (once) + sign EXACTLY the bytes you ship
+# 4. Bind the artifact, then sign EXACTLY the bytes you ship.
+#    bind writes the artifact's SHA-256 into manifest.json (`wasm_sha256`);
+#    install re-checks it, so any post-sign .wasm swap fails closed.
+hexforge-cli plugin bind manifest.json plugin.wasm
+# manifest bound: wasm_sha256=<64 hex>
 hexforge-cli plugin keygen
 # pubkey=<64 hex>
 # signing_key=<64 hex>   # keep secret
@@ -41,9 +45,11 @@ hexforge-cli plugin sign manifest.json --key <signing_key>
 
 # 5. Install: HexForge app → Plugins → Install, with
 #    plugin.wasm + manifest.json + signature + pubkey.
-#    The host verifies the Ed25519 signature (TOFU), parses + validates the
-#    manifest, and load-checks the binary as component first, core module second
-#    (legacy core-module plugins keep working via the manifest fallback).
+#    The host verifies the Ed25519 signature (TOFU), checks the wasm binding,
+#    parses + validates the manifest, and load-checks the binary as component
+#    first, core module second (legacy core-module plugins keep working via
+#    the manifest fallback). Installs persist in the app library and survive
+#    restarts; capability grants persist per install (grants.json).
 
 # 6. Capability grant: privileged caps (filesystem_read, filesystem_write,
 #    network) requested in manifest.json must be granted before install

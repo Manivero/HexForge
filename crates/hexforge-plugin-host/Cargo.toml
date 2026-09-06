@@ -19,3 +19,4 @@ anyhow = "1"
 wat = "1"
 wit-component = "0.230"
 uuid = { workspace = true }
+sha2 = "0.10"

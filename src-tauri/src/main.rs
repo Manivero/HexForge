@@ -4,45 +4,48 @@
 mod commands;
 
 use hexforge_engine::state;
+use std::path::PathBuf;
+use tauri::Manager;
 
 use state::AppState;
+
+/// Resolves the persistent plugin library: `HEXFORGE_PLUGINS_DIR` wins when
+/// set (tests / portable installs), otherwise the platform app-data dir
+/// (`com.hexforge.app`), so installs survive restarts AND cwd changes.
+/// The repo-local `./plugins` stays as a read-only dev root — example
+/// plugins keep working without being copied into the writable store.
+fn resolve_plugin_library(app: &tauri::App) -> hexforge_plugin_host::store::PluginLibrary {
+    let writable = std::env::var(hexforge_plugin_host::store::PLUGINS_DIR_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            app.path()
+                .app_data_dir()
+                .map(|d| d.join("plugins"))
+                .unwrap_or_else(|_| PathBuf::from("./plugins"))
+        });
+    eprintln!(
+        "[hexforge-plugin-host] library root: {}",
+        writable.display()
+    );
+    hexforge_plugin_host::store::PluginLibrary::new(writable, vec![PathBuf::from("./plugins")])
+}
 
 fn main() {
     // Реестр операций строится один раз при старте из всех `Transform`,
     // собранных `inventory` в `hexforge-ops` на этапе линковки —
     // ни один встроенный оператор не требует правки этого файла (FR-3.1).
-    let mut registry = hexforge_ops::build_registry();
+    let registry = hexforge_ops::build_registry();
     eprintln!(
         "[hexforge-core] initialized with {} operations",
         registry.len()
     );
 
-    // Plugin host: discover plugins in `./plugins` and register their transforms (FR-6).
+    // Plugin host runtime (FR-6). Discovery + registration happen in
+    // `setup`, where the app-data library root is resolvable; installs land
+    // in that persistent root and are re-verified on every later startup.
     let plugin_runtime = std::sync::Arc::new(
         hexforge_plugin_host::PluginRuntime::new(None).expect("plugin runtime init failed"),
     );
-    let plugin_instances = hexforge_plugin_host::list_plugins();
-    eprintln!(
-        "[hexforge-plugin-host] discovered {} plugin(s)",
-        plugin_instances.len()
-    );
-    for inst in plugin_instances {
-        match plugin_runtime.clone().as_transform(inst.clone()) {
-            Ok(pt) => {
-                let leaked: Box<dyn hexforge_core::Transform> = Box::new(pt);
-                let static_ref: &'static dyn hexforge_core::Transform = Box::leak(leaked);
-                let id = static_ref.id().to_string();
-                registry.register(static_ref);
-                eprintln!("[hexforge-plugin-host] registered plugin transform: {id}");
-            }
-            Err(e) => {
-                eprintln!(
-                    "[hexforge-plugin-host] failed to load plugin {}: {e}",
-                    inst.manifest.id
-                );
-            }
-        }
-    }
 
     // AppState управляется через Arc: async-команда run_node обязана
     // передать владение состоянием в blocking-пул (spawn_blocking требует
@@ -50,6 +53,36 @@ fn main() {
     tauri::Builder::default()
         .manage(std::sync::Arc::new(AppState::new(registry)))
         .manage(plugin_runtime)
+        .setup(|app| {
+            let library = resolve_plugin_library(app);
+            let state = app.state::<std::sync::Arc<AppState>>();
+            let runtime = app
+                .state::<std::sync::Arc<hexforge_plugin_host::PluginRuntime>>()
+                .inner()
+                .clone();
+            let mut verified = 0usize;
+            for inst in library.verified_instances() {
+                match runtime.clone().as_transform(inst.clone()) {
+                    Ok(pt) => {
+                        let leaked: Box<dyn hexforge_core::Transform> = Box::new(pt);
+                        let static_ref: &'static dyn hexforge_core::Transform = Box::leak(leaked);
+                        let id = static_ref.id().to_string();
+                        state.register_plugin(static_ref);
+                        verified += 1;
+                        eprintln!("[hexforge-plugin-host] registered plugin transform: {id}");
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[hexforge-plugin-host] verified plugin failed to load {}: {e}",
+                            inst.manifest.id
+                        );
+                    }
+                }
+            }
+            eprintln!("[hexforge-plugin-host] discovered {verified} verified plugin(s)");
+            app.manage(library);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::list_operations,

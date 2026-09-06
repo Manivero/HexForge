@@ -10,7 +10,6 @@ use hexforge_engine::graph_dto::GraphDto;
 use hexforge_engine::scheduler;
 use hexforge_engine::state::{AppState, SourceEntry, WriteRegionError};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -918,6 +917,10 @@ pub struct PluginManifestDto {
     pub category: String,
     pub author: String,
     pub signature_valid: bool,
+    /// Discovery verdict (`verified` | `invalid` | `unavailable` |
+    /// `incompatible`): the single backend-owned source for the PluginPanel
+    /// status badge. `signature_valid` mirrors `status == "verified"`.
+    pub status: String,
     pub requested_capabilities: Vec<String>,
     pub granted_capabilities: Vec<String>,
 }
@@ -927,6 +930,7 @@ pub struct PluginManifestDto {
 fn plugin_manifest_dto(
     manifest: hexforge_plugin_host::PluginManifest,
     signature_valid: bool,
+    status: hexforge_plugin_host::store::PluginStatus,
 ) -> PluginManifestDto {
     PluginManifestDto {
         display_name: manifest.name.clone(),
@@ -936,27 +940,29 @@ fn plugin_manifest_dto(
         version: manifest.version,
         author: manifest.author,
         signature_valid,
+        status: status.as_str().to_string(),
         requested_capabilities: manifest.requested_capabilities,
         granted_capabilities: manifest.granted_capabilities,
     }
 }
 
+/// Lists every discovered plugin WITH its fail-closed verdict: verified
+/// entries are registrable, the rest (`invalid` / `unavailable` /
+/// `incompatible`) carry their signed manifest data for display and are
+/// NEVER registered or executed. Entries without any parseable manifest
+/// (unidentifiable garbage) are skipped — there is nothing truthful to show.
 #[tauri::command]
-pub fn list_plugins() -> Vec<PluginManifestDto> {
-    hexforge_plugin_host::list_plugins()
+pub fn list_plugins(
+    library: State<'_, hexforge_plugin_host::store::PluginLibrary>,
+) -> Vec<PluginManifestDto> {
+    use hexforge_plugin_host::store::PluginStatus;
+    library
+        .discover()
         .into_iter()
-        .map(|inst| {
-            // Verify over the ORIGINAL manifest file bytes: re-serializing the
-            // parsed manifest would change field order/whitespace and break the
-            // signature even for legitimately signed plugins.
-            let manifest_bytes = std::fs::read(inst.manifest_path()).unwrap_or_default();
-            let sig_valid = hexforge_plugin_host::verify_signature(
-                &manifest_bytes,
-                &inst.signature_hex,
-                &inst.pubkey_hex,
-            )
-            .unwrap_or(false);
-            plugin_manifest_dto(inst.manifest, sig_valid)
+        .filter_map(|entry| {
+            let manifest = entry.manifest?;
+            let sig_valid = entry.status == PluginStatus::Verified;
+            Some(plugin_manifest_dto(manifest, sig_valid, entry.status))
         })
         .collect()
 }
@@ -973,9 +979,14 @@ pub fn install_plugin(
     req: InstallPluginRequest,
     state: State<'_, Arc<AppState>>,
     plugin_runtime: State<'_, Arc<hexforge_plugin_host::PluginRuntime>>,
+    library: State<'_, hexforge_plugin_host::store::PluginLibrary>,
 ) -> HexForgeResult<PluginManifestDto> {
+    use hexforge_plugin_host::store::PluginStatus;
     validate_fs_path(&req.wasm_path, "wasmPath")?;
     validate_fs_path(&req.manifest_path, "manifestPath")?;
+    let wasm_bytes = std::fs::read(&req.wasm_path).map_err(|e| {
+        HexForgeError::invalid_input(format!("cannot read wasm '{}': {e}", req.wasm_path))
+    })?;
     let manifest_bytes = std::fs::read(&req.manifest_path).map_err(|e| {
         HexForgeError::invalid_input(format!("cannot read manifest '{}': {e}", req.manifest_path))
     })?;
@@ -984,23 +995,41 @@ pub fn install_plugin(
             .map_err(|e| HexForgeError::invalid_input(format!("manifest JSON invalid: {e}")))?;
     // Signatures are REQUIRED (fail-closed): sidecar `<manifest>.sig` and
     // `<manifest>.pub` must exist next to the manifest. There is no unsigned
-    // "developer mode" — sign locally with `hexforge-cli plugin keygen/sign`.
+    // "developer mode" — sign locally with
+    // `hexforge-cli plugin bind <manifest> <wasm>` then `plugin sign`.
     let sig_path = format!("{}.sig", req.manifest_path);
     let pub_path = format!("{}.pub", req.manifest_path);
     let signature_hex = std::fs::read_to_string(&sig_path).unwrap_or_default();
     let pubkey_hex = std::fs::read_to_string(&pub_path).unwrap_or_default();
 
-    let runtime = plugin_runtime.inner().clone();
-    let instance = runtime
-        .install(
-            Path::new(&req.wasm_path),
+    // Validate → verify → atomically persist into the app library, then
+    // re-verify from disk. The returned instance proves the full
+    // persist → rediscover loop; it survives app restarts via discovery.
+    // A same-id reinstall is a deterministic atomic replace (new package is
+    // fully verified before the old one moves; rollback on failure).
+    let entry = library
+        .install_package(
+            &wasm_bytes,
             &manifest_bytes,
             signature_hex.trim(),
             pubkey_hex.trim(),
         )
-        .map_err(|e| HexForgeError::internal(format!("install failed: {e}")))?;
+        .map_err(|e| match e {
+            hexforge_plugin_host::PluginError::InvalidSignature(_)
+            | hexforge_plugin_host::PluginError::InvalidPublicKey(_)
+            | hexforge_plugin_host::PluginError::ManifestParse(_)
+            | hexforge_plugin_host::PluginError::InvalidManifest(_)
+            | hexforge_plugin_host::PluginError::CapabilityDenied(_) => {
+                HexForgeError::invalid_input(format!("install refused: {e}"))
+            }
+            other => HexForgeError::internal(format!("install failed: {other}")),
+        })?;
+    let instance = entry.instance.clone().ok_or_else(|| {
+        HexForgeError::internal("installed package failed re-verification (bug)".to_string())
+    })?;
 
     // Register as Transform via PluginTransform wrapper
+    let runtime = plugin_runtime.inner().clone();
     let transform: &'static dyn hexforge_core::Transform = runtime
         .as_transform(instance.clone())
         .map(|pt| {
@@ -1010,13 +1039,11 @@ pub fn install_plugin(
         .map_err(|e| HexForgeError::internal(format!("plugin transform creation failed: {e}")))?;
     state.register_plugin(transform);
 
-    let sig_valid = hexforge_plugin_host::verify_signature(
-        &manifest_bytes,
-        &instance.signature_hex,
-        &instance.pubkey_hex,
-    )
-    .unwrap_or(false);
-    Ok(plugin_manifest_dto(instance.manifest, sig_valid))
+    Ok(plugin_manifest_dto(
+        instance.manifest,
+        true,
+        PluginStatus::Verified,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1027,14 +1054,18 @@ pub struct GrantCapabilityRequest {
 }
 
 /// Privileged capabilities (single source; mirrors
-/// `PluginRuntime::is_privileged_cap`). Persisting a grant would rewrite the
-/// signed manifest and invalidate its Ed25519 signature, so grant/revoke are
-/// validated session acknowledgements until a re-signing ceremony lands —
-/// the commands validate input and return `true`, persistence is NOT claimed.
+/// `PluginRuntime::is_privileged_cap` and `store::POLICY_CAPABILITIES`).
+/// Grants persist in the installed package's `grants.json` — a versioned
+/// LOCAL state file that only narrows the signed `requested` set and is
+/// re-clamped on every discovery. The signed manifest itself is never
+/// rewritten (that would invalidate its Ed25519 signature).
 const VALID_CAPABILITIES: [&str; 3] = ["filesystem_read", "filesystem_write", "network"];
 
 #[tauri::command]
-pub fn grant_capability(req: GrantCapabilityRequest) -> HexForgeResult<bool> {
+pub fn grant_capability(
+    req: GrantCapabilityRequest,
+    library: State<'_, hexforge_plugin_host::store::PluginLibrary>,
+) -> HexForgeResult<bool> {
     if req.plugin_id.trim().is_empty() {
         return Err(HexForgeError::invalid_parameter(
             "pluginId",
@@ -1047,6 +1078,28 @@ pub fn grant_capability(req: GrantCapabilityRequest) -> HexForgeResult<bool> {
             format!("unknown capability '{}'", req.capability),
         ));
     }
+    let entry = library.get(&req.plugin_id).ok_or_else(|| {
+        HexForgeError::invalid_parameter(
+            "pluginId",
+            format!(
+                "unknown plugin '{}' (only installed packages accept persisted grants)",
+                req.plugin_id
+            ),
+        )
+    })?;
+    let manifest = entry.manifest.ok_or_else(|| {
+        HexForgeError::internal(format!(
+            "plugin '{}' has no readable manifest; reinstall it",
+            req.plugin_id
+        ))
+    })?;
+    let mut next = manifest.granted_capabilities;
+    if !next.iter().any(|c| c == &req.capability) {
+        next.push(req.capability.clone());
+    }
+    library
+        .set_grants(&req.plugin_id, &next)
+        .map_err(|e| HexForgeError::internal(format!("grant refused: {e}")))?;
     Ok(true)
 }
 
@@ -1058,7 +1111,10 @@ pub struct RevokeCapabilityRequest {
 }
 
 #[tauri::command]
-pub fn revoke_capability(req: RevokeCapabilityRequest) -> HexForgeResult<bool> {
+pub fn revoke_capability(
+    req: RevokeCapabilityRequest,
+    library: State<'_, hexforge_plugin_host::store::PluginLibrary>,
+) -> HexForgeResult<bool> {
     if req.plugin_id.trim().is_empty() {
         return Err(HexForgeError::invalid_parameter(
             "pluginId",
@@ -1071,6 +1127,29 @@ pub fn revoke_capability(req: RevokeCapabilityRequest) -> HexForgeResult<bool> {
             format!("unknown capability '{}'", req.capability),
         ));
     }
+    let entry = library.get(&req.plugin_id).ok_or_else(|| {
+        HexForgeError::invalid_parameter(
+            "pluginId",
+            format!(
+                "unknown plugin '{}' (only installed packages accept persisted grants)",
+                req.plugin_id
+            ),
+        )
+    })?;
+    let manifest = entry.manifest.ok_or_else(|| {
+        HexForgeError::internal(format!(
+            "plugin '{}' has no readable manifest; reinstall it",
+            req.plugin_id
+        ))
+    })?;
+    let next: Vec<String> = manifest
+        .granted_capabilities
+        .into_iter()
+        .filter(|c| c != &req.capability)
+        .collect();
+    library
+        .set_grants(&req.plugin_id, &next)
+        .map_err(|e| HexForgeError::internal(format!("revoke refused: {e}")))?;
     Ok(true)
 }
 
@@ -1470,6 +1549,7 @@ mod tests {
             category: "Plugin".into(),
             author: "HexForge".into(),
             signature_valid: true,
+            status: "verified".into(),
             requested_capabilities: vec!["filesystem_read".into()],
             granted_capabilities: vec![],
         };
@@ -1483,6 +1563,7 @@ mod tests {
                 "category": "Plugin",
                 "author": "HexForge",
                 "signatureValid": true,
+                "status": "verified",
                 "requestedCapabilities": ["filesystem_read"],
                 "grantedCapabilities": [],
             })

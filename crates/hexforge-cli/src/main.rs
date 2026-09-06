@@ -121,14 +121,31 @@ fn main() {
                     }
                 }
             }
+            "bind" => {
+                // plugin bind <manifest.json> <plugin.wasm> — writes wasm_sha256
+                // into the manifest (in place). Sign AFTER binding.
+                if rest.len() != 2 {
+                    eprintln!(
+                        "error: usage: hexforge-cli plugin bind <manifest.json> <plugin.wasm>"
+                    );
+                    std::process::exit(2);
+                }
+                match hexforge_cli::plugin_bind_artifact(&rest[0], &rest[1]) {
+                    Ok(msg) => println!("OK: {msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             other => {
-                eprintln!("error: unknown plugin subcommand '{other}' (keygen|sign|validate)");
+                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate)");
                 std::process::exit(2);
             }
         },
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>"
             );
             std::process::exit(2);
         }
