@@ -12,3 +12,8 @@ wit-bindgen = "0.36"
 # Standalone template: detached from the HexForge workspace on purpose,
 # so `cargo build --target wasm32-wasip1` works from this directory.
 [workspace]
+
+# no_std guest: unwind needs an eh_personality lang item that does not
+# exist on wasm; abort turns panics into traps the host isolates.
+[profile.release]
+panic = "abort"
