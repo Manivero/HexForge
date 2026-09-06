@@ -82,6 +82,8 @@ pub enum PluginError {
     CapabilityDenied(String),
     #[error("execution failed: {0}")]
     ExecutionError(String),
+    #[error("incompatible plugin: {0}")]
+    Incompatible(String),
 }
 
 fn wasm_i32_length(length: usize, field: &str) -> Result<i32> {
@@ -704,8 +706,13 @@ impl PluginTransform {
         Results: wasmtime::component::ComponentNamedList + wasmtime::component::Lift,
     {
         let full = format!("{}/{func}", Self::TRANSFORM_IFACE);
+        // Real tooling (wit-bindgen) exports the instance versioned
+        // (`hexforge:plugin/transform@0.1.0`); hand-written fixtures may use
+        // the bare name. Accept either, pinned to the contract version.
+        let versioned = format!("{}@{}", Self::TRANSFORM_IFACE, crate::WIT_VERSION);
         let iface_idx = inst
             .get_export_index(&mut *store, None, Self::TRANSFORM_IFACE)
+            .or_else(|| inst.get_export_index(&mut *store, None, &versioned))
             .ok_or_else(|| Self::wit_export_error(&full))?;
         let func_idx = inst
             .get_export_index(&mut *store, Some(&iface_idx), func)

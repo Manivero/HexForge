@@ -358,6 +358,13 @@ impl PluginLibrary {
                 "wasm file is neither a valid component nor a valid core module".into(),
             ));
         }
+        if !component_contract_ok(wasm_bytes) {
+            return Err(PluginError::Incompatible(format!(
+                "component does not export the hexforge:plugin/transform@{} contract \
+                 (with `apply`): built against an unsupported WIT version",
+                crate::WIT_VERSION
+            )));
+        }
         // A package that could never execute must not install: privileged
         // requests need matching effective grants (seeded from the manifest).
         let effective = effective_grants(&manifest, &manifest.granted_capabilities);
@@ -494,6 +501,16 @@ impl PluginLibrary {
             return fail_as(
                 PluginStatus::Incompatible,
                 format!("package '{id}' wasm is neither a component nor a core module"),
+            );
+        }
+        if !component_contract_ok(&wasm_bytes) {
+            return fail_as(
+                PluginStatus::Incompatible,
+                format!(
+                    "package '{id}' component does not export \
+                     the hexforge:plugin/transform@{} contract",
+                    crate::WIT_VERSION
+                ),
             );
         }
         let effective = match read_grants_file(&dir.join(GRANTS_FILENAME)) {
@@ -695,6 +712,33 @@ fn is_loadable(wasm_bytes: &[u8]) -> bool {
     };
     wasmtime::component::Component::from_binary(&engine, wasm_bytes).is_ok()
         || wasmtime::Module::from_binary(&engine, wasm_bytes).is_ok()
+}
+
+/// WIT contract-version gate: a *component* must export the transform
+/// instance pinned by this host (`hexforge:plugin/transform`, bare for
+/// hand-written fixtures or `@{WIT_VERSION}` as emitted by wit-bindgen)
+/// with an `apply` func. Core modules skip the check (legacy compat path —
+/// `is_loadable` still gates them). Query-only: never instantiates, so
+/// discovery/install cannot execute guest code.
+fn component_contract_ok(wasm_bytes: &[u8]) -> bool {
+    const TRANSFORM_IFACE: &str = "hexforge:plugin/transform";
+    let engine = match wasmtime::Engine::new(&wasmtime::Config::new()) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    let component = match wasmtime::component::Component::from_binary(&engine, wasm_bytes) {
+        Ok(c) => c,
+        Err(_) => return true, // not a component: legacy core-module path
+    };
+    let iface = component
+        .get_export_index(None, TRANSFORM_IFACE)
+        .or_else(|| {
+            component.get_export_index(None, format!("{TRANSFORM_IFACE}@{}", crate::WIT_VERSION))
+        });
+    let Some(iface) = iface else {
+        return false;
+    };
+    component.get_export_index(Some(&iface), "apply").is_some()
 }
 
 /// Same-dir temp file + rename: atomic on both POSIX and Windows (file

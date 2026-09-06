@@ -1019,7 +1019,8 @@ pub fn install_plugin(
             | hexforge_plugin_host::PluginError::InvalidPublicKey(_)
             | hexforge_plugin_host::PluginError::ManifestParse(_)
             | hexforge_plugin_host::PluginError::InvalidManifest(_)
-            | hexforge_plugin_host::PluginError::CapabilityDenied(_) => {
+            | hexforge_plugin_host::PluginError::CapabilityDenied(_)
+            | hexforge_plugin_host::PluginError::Incompatible(_) => {
                 HexForgeError::invalid_input(format!("install refused: {e}"))
             }
             other => HexForgeError::internal(format!("install failed: {other}")),
