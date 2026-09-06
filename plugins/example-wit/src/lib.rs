@@ -24,11 +24,11 @@ wit_bindgen::generate!({
 
 use exports::hexforge::plugin::transform::{Capabilities, Guest};
 
-/// Template heap: 8 MiB static buffer. Instances are short-lived (one
+/// Template heap: 16 MiB static buffer. Instances are short-lived (one
 /// execution per instance), so never freeing is bounded by a single
 /// `apply` call. Raise for bigger payloads; the host caps outputs at
 /// 10 MiB regardless.
-const HEAP_SIZE: usize = 8 * 1024 * 1024;
+const HEAP_SIZE: usize = 16 * 1024 * 1024;
 
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 static NEXT: AtomicUsize = AtomicUsize::new(0);

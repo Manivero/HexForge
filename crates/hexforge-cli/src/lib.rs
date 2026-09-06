@@ -414,3 +414,116 @@ pub fn plugin_install(
         stored.id, stored.version, found.status
     ))
 }
+
+/// Shared grant/revoke core: same backend as the Tauri commands
+/// (`PluginLibrary::get` for fresh state + `set_grants` for the
+/// re-verified, policy-clamped persistent write). No separate trust model.
+fn plugin_set_grant(
+    verb: &str,
+    plugin_id: &str,
+    root: &str,
+    capability: &str,
+) -> Result<String, String> {
+    if plugin_id.trim().is_empty() {
+        return Err("plugin id must not be empty".into());
+    }
+    validate_cli_path(root, "root")?;
+    if capability.trim().is_empty() {
+        return Err("capability must not be empty".into());
+    }
+    if !hexforge_plugin_host::store::POLICY_CAPABILITIES.contains(&capability) {
+        return Err(format!(
+            "unknown capability '{capability}' (policy allows: {:?})",
+            hexforge_plugin_host::store::POLICY_CAPABILITIES
+        ));
+    }
+    let library =
+        hexforge_plugin_host::store::PluginLibrary::new(std::path::PathBuf::from(root), Vec::new());
+    let entry = library.get(plugin_id).ok_or_else(|| {
+        format!("unknown plugin '{plugin_id}' (only installed packages accept persisted grants)")
+    })?;
+    let manifest = entry
+        .manifest
+        .ok_or_else(|| format!("plugin '{plugin_id}' has no readable manifest; reinstall it"))?;
+    let mut next = manifest.granted_capabilities;
+    if verb == "grant" {
+        if !next.iter().any(|c| c == capability) {
+            next.push(capability.to_string());
+        }
+    } else {
+        next.retain(|c| c != capability);
+    }
+    let effective = library
+        .set_grants(plugin_id, &next)
+        .map_err(|e| format!("{verb} refused: {e}"))?;
+    let past = if verb == "grant" {
+        "granted"
+    } else {
+        "revoked"
+    };
+    Ok(format!(
+        "{past}: id={plugin_id} capability={capability} effective_grants={effective:?}"
+    ))
+}
+
+/// Plugin SDK: persist a capability grant (headless twin of the UI flow).
+pub fn plugin_grant(plugin_id: &str, root: &str, capability: &str) -> Result<String, String> {
+    plugin_set_grant("grant", plugin_id, root, capability)
+}
+
+/// Plugin SDK: persist a capability revocation (headless twin of the UI flow).
+pub fn plugin_revoke(plugin_id: &str, root: &str, capability: &str) -> Result<String, String> {
+    plugin_set_grant("revoke", plugin_id, root, capability)
+}
+
+/// Plugin SDK: execute an installed, verified plugin.
+///
+/// Fresh discovery on every call (same as the app startup path), so grants
+/// or artifacts changed since install are honored or refused exactly as the
+/// UI would. Input comes from `--in`, output goes to `--out`; execution
+/// failures (denied capability, trap, fuel exhaustion) propagate verbatim.
+pub fn plugin_run(
+    plugin_id: &str,
+    root: &str,
+    input_path: &str,
+    output_path: &str,
+) -> Result<String, String> {
+    if plugin_id.trim().is_empty() {
+        return Err("plugin id must not be empty".into());
+    }
+    validate_cli_path(root, "root")?;
+    validate_cli_path(input_path, "input")?;
+    validate_cli_path(output_path, "output")?;
+
+    let library =
+        hexforge_plugin_host::store::PluginLibrary::new(std::path::PathBuf::from(root), Vec::new());
+    let entry = library
+        .get(plugin_id)
+        .ok_or_else(|| format!("unknown plugin '{plugin_id}' (is it installed under '{root}'?)"))?;
+    if entry.status != hexforge_plugin_host::store::PluginStatus::Verified {
+        return Err(format!(
+            "plugin '{plugin_id}' is not runnable ({:?}): {}",
+            entry.status,
+            entry.error.unwrap_or_else(|| "unknown reason".into())
+        ));
+    }
+    let instance = entry
+        .instance
+        .ok_or_else(|| format!("plugin '{plugin_id}' has no executable instance; reinstall it"))?;
+    // Identity resolved before touching input: a wrong id reports as such
+    // even when the input path is also bad.
+    let input =
+        std::fs::read(input_path).map_err(|e| format!("cannot read input '{input_path}': {e}"))?;
+    let runtime = hexforge_plugin_host::PluginRuntime::new(None)
+        .map_err(|e| format!("cannot start plugin runtime: {e}"))?;
+    let output = runtime
+        .execute(&instance, &input)
+        .map_err(|e| format!("run failed: {e}"))?;
+    std::fs::write(output_path, &output)
+        .map_err(|e| format!("cannot write output '{output_path}': {e}"))?;
+    Ok(format!(
+        "ran: id={plugin_id} in_bytes={} out_bytes={} wrote={output_path}",
+        input.len(),
+        output.len()
+    ))
+}

@@ -139,7 +139,6 @@ fn main() {
                 }
             }
             "new" => {
-                // plugin new <dir> [--id <id>] [--name <name>]
                 let mut dir: Option<&str> = None;
                 let mut id: Option<&str> = None;
                 let mut name: Option<&str> = None;
@@ -230,14 +229,108 @@ fn main() {
                     }
                 }
             }
+            "grant" | "revoke" => {
+                // plugin grant|revoke <id> --root <dir> --cap <cap>
+                let verb = sub.as_str();
+                let mut id: Option<&str> = None;
+                let mut root: Option<&str> = None;
+                let mut cap: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--root" | "--cap" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: {} requires an argument", rest[i]);
+                                std::process::exit(2);
+                            }
+                            if rest[i] == "--root" {
+                                root = Some(&rest[i + 1]);
+                            } else {
+                                cap = Some(&rest[i + 1]);
+                            }
+                            i += 2;
+                        }
+                        other => {
+                            if id.is_some() {
+                                eprintln!("error: unexpected argument '{other}'");
+                                std::process::exit(2);
+                            }
+                            id = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let (Some(id), Some(root), Some(cap)) = (id, root, cap) else {
+                    eprintln!(
+                        "error: usage: hexforge-cli plugin {verb} <id> --root <dir> --cap <cap>"
+                    );
+                    std::process::exit(2);
+                };
+                let result = if verb == "grant" {
+                    hexforge_cli::plugin_grant(id, root, cap)
+                } else {
+                    hexforge_cli::plugin_revoke(id, root, cap)
+                };
+                match result {
+                    Ok(msg) => println!("{msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "run" => {
+                // plugin run <id> --root <dir> --in <file> --out <file>
+                let mut id: Option<&str> = None;
+                let mut root: Option<&str> = None;
+                let mut input: Option<&str> = None;
+                let mut output: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--root" | "--in" | "--out" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: {} requires an argument", rest[i]);
+                                std::process::exit(2);
+                            }
+                            match rest[i].as_str() {
+                                "--root" => root = Some(&rest[i + 1]),
+                                "--in" => input = Some(&rest[i + 1]),
+                                _ => output = Some(&rest[i + 1]),
+                            }
+                            i += 2;
+                        }
+                        other => {
+                            if id.is_some() {
+                                eprintln!("error: unexpected argument '{other}'");
+                                std::process::exit(2);
+                            }
+                            id = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let (Some(id), Some(root), Some(input), Some(output)) = (id, root, input, output)
+                else {
+                    eprintln!("error: usage: hexforge-cli plugin run <id> --root <dir> --in <file> --out <file>");
+                    std::process::exit(2);
+                };
+                match hexforge_cli::plugin_run(id, root, input, output) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             other => {
-                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate|new|install)");
+                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate|new|install|grant|revoke|run)");
                 std::process::exit(2);
             }
         },
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin new <dir> [--id <id>] [--name <name>]\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>\n  hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin new <dir> [--id <id>] [--name <name>]\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>\n  hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]\n  hexforge-cli plugin grant|revoke <id> --root <dir> --cap <cap>\n  hexforge-cli plugin run <id> --root <dir> --in <file> --out <file>"
             );
             std::process::exit(2);
         }
