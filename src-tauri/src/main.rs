@@ -16,7 +16,9 @@ use state::AppState;
 /// (`com.hexforge.app`), so installs survive restarts AND cwd changes.
 /// The repo-local `./plugins` stays as a read-only dev root — example
 /// plugins keep working without being copied into the writable store.
-fn resolve_plugin_library(app: &tauri::App) -> hexforge_plugin_host::store::PluginLibrary {
+fn resolve_plugin_library<R: tauri::Runtime>(
+    app: &tauri::App<R>,
+) -> hexforge_plugin_host::store::PluginLibrary {
     let writable = std::env::var(hexforge_plugin_host::store::PLUGINS_DIR_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -109,4 +111,47 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running HexForge");
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::resolve_plugin_library;
+    use tauri::Manager;
+
+    fn mock_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .build(tauri::generate_context!())
+            .expect("mock app builds")
+    }
+
+    /// `resolve_plugin_library`: override → app-data → fallback, в одном
+    /// потоке последовательно (env process-global, параллелить нельзя).
+    #[test]
+    fn library_root_resolution() {
+        let key = hexforge_plugin_host::store::PLUGINS_DIR_ENV;
+        let saved = std::env::var_os(key);
+
+        // 1. Override побеждает: writable root ровно он, библиотека рабочая.
+        let override_root =
+            std::env::temp_dir().join(format!("hexforge-resolver-{}", uuid::Uuid::new_v4()));
+        std::env::set_var(key, &override_root);
+        let lib = resolve_plugin_library(&mock_app());
+        assert_eq!(lib.writable_dir(), override_root.as_path());
+        assert!(lib.discover().is_empty());
+        let _ = std::fs::remove_dir_all(&override_root);
+
+        // 2. Без override — прод-путь: app-data/plugins либо fallback.
+        std::env::remove_var(key);
+        let app = mock_app();
+        let lib = resolve_plugin_library(&app);
+        match app.path().app_data_dir() {
+            Ok(data) => assert_eq!(lib.writable_dir(), data.join("plugins").as_path()),
+            Err(_) => assert_eq!(lib.writable_dir(), std::path::Path::new("./plugins")),
+        }
+        assert!(lib.discover().is_empty());
+
+        if let Some(v) = saved {
+            std::env::set_var(key, v);
+        }
+    }
 }
