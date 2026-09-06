@@ -280,3 +280,137 @@ pub fn plugin_bind_artifact(manifest_path: &str, wasm_path: &str) -> Result<Stri
         manifest.wasm_sha256.unwrap_or_default()
     ))
 }
+
+/// Official template sources (single source of truth: `plugins/example-wit`).
+/// `plugin new` copies these verbatim, except `manifest.json`, which is
+/// re-issued for the new plugin (id/name/version reset, no stale binding).
+const TEMPLATE_CARGO_TOML: &str = include_str!("../../../plugins/example-wit/Cargo.toml");
+const TEMPLATE_LIB_RS: &str = include_str!("../../../plugins/example-wit/src/lib.rs");
+const TEMPLATE_WIT: &str = include_str!("../../../plugins/example-wit/wit/plugin.wit");
+const TEMPLATE_MANIFEST_JSON: &str = include_str!("../../../plugins/example-wit/manifest.json");
+const TEMPLATE_README_MD: &str = include_str!("../../../plugins/example-wit/README.md");
+
+/// Plugin SDK: scaffold a new plugin from the official template.
+///
+/// Creates `<dir>/` with `Cargo.toml`, `src/lib.rs`, `wit/plugin.wit`,
+/// `manifest.json` (fresh id/name/version `0.1.0`, author kept from the
+/// template for you to edit, `wasm_sha256` removed — run `plugin bind`
+/// after building) and `README.md` (the developer guide). Refuses to touch
+/// a non-empty directory: scaffolding must never silently overwrite code.
+pub fn plugin_new(dir: &str, id: Option<&str>, name: Option<&str>) -> Result<String, String> {
+    validate_cli_path(dir, "dir")?;
+    let root = std::path::Path::new(dir);
+    if root.exists() {
+        let non_empty = std::fs::read_dir(root)
+            .map_err(|e| format!("cannot list directory '{dir}': {e}"))?
+            .next()
+            .is_some();
+        if non_empty {
+            return Err(format!(
+                "refusing to scaffold into non-empty directory '{dir}'"
+            ));
+        }
+    } else {
+        std::fs::create_dir_all(root)
+            .map_err(|e| format!("cannot create directory '{dir}': {e}"))?;
+    }
+    let default_id = root
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "my-plugin".into());
+    let id = id.unwrap_or(&default_id);
+    let name = name.unwrap_or(id);
+
+    let mut manifest_value: serde_json::Value = serde_json::from_str(TEMPLATE_MANIFEST_JSON)
+        .map_err(|e| format!("template manifest is corrupt (bug): {e}"))?;
+    let obj = manifest_value
+        .as_object_mut()
+        .ok_or("template manifest is not a JSON object (bug)")?;
+    obj.insert("id".into(), serde_json::Value::String(id.to_string()));
+    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
+    obj.insert("version".into(), serde_json::Value::String("0.1.0".into()));
+    obj.remove("wasm_sha256");
+    obj.insert(
+        "granted_capabilities".into(),
+        serde_json::Value::Array(Vec::new()),
+    );
+    let manifest: hexforge_plugin_host::PluginManifest =
+        serde_json::from_value(manifest_value.clone())
+            .map_err(|e| format!("scaffolded manifest invalid (bug): {e}"))?;
+    hexforge_plugin_host::validate_manifest(&manifest)
+        .map_err(|e| format!("scaffolded manifest invalid (bug): {e}"))?;
+
+    for (rel, content) in [
+        ("Cargo.toml", TEMPLATE_CARGO_TOML),
+        ("src/lib.rs", TEMPLATE_LIB_RS),
+        ("wit/plugin.wit", TEMPLATE_WIT),
+        ("README.md", TEMPLATE_README_MD),
+    ] {
+        let dest = root.join(rel);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("cannot create '{}': {e}", parent.display()))?;
+        }
+        std::fs::write(&dest, content)
+            .map_err(|e| format!("cannot write '{}': {e}", dest.display()))?;
+    }
+    let manifest_text = serde_json::to_string_pretty(&manifest_value)
+        .map_err(|e| format!("cannot render manifest (bug): {e}"))?;
+    std::fs::write(root.join("manifest.json"), manifest_text + "\n")
+        .map_err(|e| format!("cannot write manifest.json: {e}"))?;
+
+    Ok(format!(
+        "created plugin '{id}' in '{dir}'\nnext: edit src/lib.rs + manifest.json (author), then\n  cargo build --release --target wasm32-wasip1\n  wasm-tools component new target/wasm32-wasip1/release/<crate>.wasm -o plugin.wasm\n  hexforge-cli plugin validate manifest.json\n  hexforge-cli plugin bind manifest.json plugin.wasm\n  hexforge-cli plugin sign manifest.json --key <hex>\n  hexforge-cli plugin install plugin.wasm manifest.json --root <library> --sig <hex> --pub <hex>"
+    ))
+}
+
+/// Plugin SDK: headless install into a plugin library root.
+///
+/// Same backend as the Tauri `install_plugin` command
+/// (`PluginLibrary::install_package`: signature → manifest → binding →
+/// WIT-contract → capabilities, staged + atomic). Signature/pubkey come
+/// from `--sig`/`--pub` or, when omitted, from the `<manifest>.sig` /
+/// `<manifest>.pub` sidecars. `--root` is required: installs never write
+/// to an implicit location.
+pub fn plugin_install(
+    wasm_path: &str,
+    manifest_path: &str,
+    root: &str,
+    sig: Option<&str>,
+    pubkey: Option<&str>,
+) -> Result<String, String> {
+    validate_cli_path(wasm_path, "wasm")?;
+    validate_cli_path(manifest_path, "manifest")?;
+    validate_cli_path(root, "root")?;
+    let wasm_bytes =
+        std::fs::read(wasm_path).map_err(|e| format!("cannot read wasm '{wasm_path}': {e}"))?;
+    let manifest_bytes = std::fs::read(manifest_path)
+        .map_err(|e| format!("cannot read manifest '{manifest_path}': {e}"))?;
+    let read_sidecar = |suffix: &str, flag: Option<&str>, what: &str| -> Result<String, String> {
+        if let Some(v) = flag {
+            if v.trim().is_empty() {
+                return Err(format!("{what} must not be empty"));
+            }
+            return Ok(v.trim().to_string());
+        }
+        let path = format!("{manifest_path}{suffix}");
+        std::fs::read_to_string(&path).map_err(|_| {
+            format!("missing {what}: pass --{what} <hex> or write the '{path}' sidecar")
+        })
+    };
+    let sig = read_sidecar(".sig", sig, "sig")?;
+    let pubkey = read_sidecar(".pub", pubkey, "pub")?;
+
+    let library =
+        hexforge_plugin_host::store::PluginLibrary::new(std::path::PathBuf::from(root), Vec::new());
+    let found = library
+        .install_package(&wasm_bytes, &manifest_bytes, sig.trim(), pubkey.trim())
+        .map_err(|e| format!("install refused: {e}"))?;
+    let stored = found
+        .manifest
+        .ok_or("installed package has no manifest (bug)")?;
+    Ok(format!(
+        "installed: id={} version={} status={:?}",
+        stored.id, stored.version, found.status
+    ))
+}

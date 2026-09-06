@@ -1,7 +1,8 @@
 //! Plugin SDK tooling: keygen → manifest → sign → validate (CI-friendly).
 
 use hexforge_cli::{
-    plugin_bind_artifact, plugin_keygen, plugin_sign_manifest, plugin_validate_manifest,
+    plugin_bind_artifact, plugin_install, plugin_keygen, plugin_new, plugin_sign_manifest,
+    plugin_validate_manifest,
 };
 
 fn write_temp_manifest(body: &str) -> String {
@@ -111,4 +112,85 @@ fn plugin_bind_before_sign_matches_library_and_pins_bytes() {
 
     let _ = std::fs::remove_file(&manifest_path);
     let _ = std::fs::remove_file(&wasm_path);
+}
+
+#[test]
+fn plugin_new_scaffolds_valid_unbound_project() {
+    let dir = std::env::temp_dir().join(format!("hexforge-new-{}", uuid::Uuid::new_v4()));
+    let dir_s = dir.to_string_lossy().into_owned();
+
+    let msg = plugin_new(&dir_s, Some("acme.demo"), Some("Demo")).unwrap();
+    assert!(msg.contains("acme.demo"), "{msg}");
+    for rel in [
+        "Cargo.toml",
+        "src/lib.rs",
+        "wit/plugin.wit",
+        "manifest.json",
+        "README.md",
+    ] {
+        assert!(dir.join(rel).is_file(), "missing {rel}");
+    }
+    // Re-issued manifest: fresh id/name, dev version, no stale binding.
+    let manifest_text = std::fs::read_to_string(dir.join("manifest.json")).unwrap();
+    let manifest_json: serde_json::Value = serde_json::from_str(&manifest_text).unwrap();
+    assert_eq!(manifest_json["id"], "acme.demo");
+    assert_eq!(manifest_json["name"], "Demo");
+    assert_eq!(manifest_json["version"], "0.1.0");
+    assert!(manifest_json.get("wasm_sha256").is_none());
+    // Scaffold validates before any build/bind/sign step.
+    plugin_validate_manifest(&dir.join("manifest.json").to_string_lossy()).unwrap();
+
+    // Scaffolding never overwrites existing work.
+    let err = plugin_new(&dir_s, Some("acme.other"), None).unwrap_err();
+    assert!(err.contains("non-empty"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+const TEMPLATE_WASM: &[u8] = include_bytes!("../../../plugins/example-wit/plugin.wasm");
+const TEMPLATE_MANIFEST: &str = include_str!("../../../plugins/example-wit/manifest.json");
+
+#[test]
+fn plugin_install_template_artifact_end_to_end() {
+    // Real developer flow on the committed template build: sign the bound
+    // manifest with an ephemeral key, install headless, rediscover.
+    let work = std::env::temp_dir().join(format!("hexforge-install-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&work).unwrap();
+    let wasm_path = work.join("plugin.wasm").to_string_lossy().into_owned();
+    let manifest_path = work.join("manifest.json").to_string_lossy().into_owned();
+    std::fs::write(&wasm_path, TEMPLATE_WASM).unwrap();
+    std::fs::write(&manifest_path, TEMPLATE_MANIFEST).unwrap();
+
+    let (pubkey, secret) = plugin_keygen();
+    let sig = plugin_sign_manifest(&manifest_path, &secret).unwrap();
+    std::fs::write(format!("{manifest_path}.sig"), &sig).unwrap();
+    std::fs::write(format!("{manifest_path}.pub"), &pubkey).unwrap();
+
+    // Sidecar path (no --sig/--pub flags).
+    let root = work.join("library").to_string_lossy().into_owned();
+    let msg = plugin_install(&wasm_path, &manifest_path, &root, None, None).unwrap();
+    assert!(msg.contains("example.wit-uppercase"), "{msg}");
+    assert!(msg.contains("Verified"), "{msg}");
+
+    let library = hexforge_plugin_host::store::PluginLibrary::new(
+        std::path::PathBuf::from(&root),
+        Vec::new(),
+    );
+    let verified = library.verified_instances();
+    assert_eq!(verified.len(), 1);
+    assert_eq!(verified[0].manifest.id, "example.wit-uppercase");
+
+    // Wrong key fails closed with a developer-readable error.
+    let (other_pub, _) = plugin_keygen();
+    let err = plugin_install(
+        &wasm_path,
+        &manifest_path,
+        &root,
+        Some(&sig),
+        Some(&other_pub),
+    )
+    .unwrap_err();
+    assert!(err.contains("signature"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&work);
 }

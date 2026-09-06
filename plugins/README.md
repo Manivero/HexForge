@@ -1,5 +1,13 @@
 # HexForge Plugins
 
+> **User or developer?**
+> - *User* — install finished plugins in the app (Plugins panel), grant or
+>   revoke capabilities there, watch the backend-owned status
+>   (`verified` / `invalid` / `unavailable` / `incompatible`).
+> - *Developer* — build your own plugin with the [official template + full
+>   guide](example-wit/README.md): `plugin new` → implement WIT → build →
+>   `bind` → `sign` → `validate` → `install` → grant → execute → test.
+
 This directory is scanned by `hexforge-plugin-host` at startup (`list_plugins()`).
 
 Each plugin is a directory or a pair of files:

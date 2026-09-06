@@ -138,14 +138,106 @@ fn main() {
                     }
                 }
             }
+            "new" => {
+                // plugin new <dir> [--id <id>] [--name <name>]
+                let mut dir: Option<&str> = None;
+                let mut id: Option<&str> = None;
+                let mut name: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--id" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: --id requires an argument");
+                                std::process::exit(2);
+                            }
+                            id = Some(&rest[i + 1]);
+                            i += 2;
+                        }
+                        "--name" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: --name requires an argument");
+                                std::process::exit(2);
+                            }
+                            name = Some(&rest[i + 1]);
+                            i += 2;
+                        }
+                        other => {
+                            if dir.is_some() {
+                                eprintln!("error: unexpected argument '{other}'");
+                                std::process::exit(2);
+                            }
+                            dir = Some(other);
+                            i += 1;
+                        }
+                    }
+                }
+                let Some(dir) = dir else {
+                    eprintln!(
+                        "error: usage: hexforge-cli plugin new <dir> [--id <id>] [--name <name>]"
+                    );
+                    std::process::exit(2);
+                };
+                match hexforge_cli::plugin_new(dir, id, name) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            "install" => {
+                // plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]
+                let mut positional: Vec<&str> = Vec::new();
+                let mut root: Option<&str> = None;
+                let mut sig: Option<&str> = None;
+                let mut pubkey: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--root" | "--sig" | "--pub" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: {} requires an argument", rest[i]);
+                                std::process::exit(2);
+                            }
+                            match rest[i].as_str() {
+                                "--root" => root = Some(&rest[i + 1]),
+                                "--sig" => sig = Some(&rest[i + 1]),
+                                _ => pubkey = Some(&rest[i + 1]),
+                            }
+                            i += 2;
+                        }
+                        other => {
+                            positional.push(other);
+                            i += 1;
+                        }
+                    }
+                }
+                if positional.len() != 2 {
+                    eprintln!("error: usage: hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]");
+                    std::process::exit(2);
+                }
+                let Some(root) = root else {
+                    eprintln!("error: --root <dir> is required (installs never write to an implicit location)");
+                    std::process::exit(2);
+                };
+                match hexforge_cli::plugin_install(positional[0], positional[1], root, sig, pubkey)
+                {
+                    Ok(msg) => println!("{msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             other => {
-                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate)");
+                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate|new|install)");
                 std::process::exit(2);
             }
         },
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin new <dir> [--id <id>] [--name <name>]\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>\n  hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]"
             );
             std::process::exit(2);
         }
