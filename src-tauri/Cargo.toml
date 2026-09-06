@@ -26,3 +26,5 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 blake3 = { workspace = true }
+# Mock IPC-boundary (`tauri::test`) для restart-lifecycle без WebView.
+tauri = { version = "2", features = ["test"] }

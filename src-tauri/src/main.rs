@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+#[cfg(test)]
+mod restart_lifecycle;
 
 use hexforge_engine::state;
 use std::path::PathBuf;
