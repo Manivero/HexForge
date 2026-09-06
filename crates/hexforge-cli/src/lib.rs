@@ -527,3 +527,40 @@ pub fn plugin_run(
         output.len()
     ))
 }
+
+/// Plugin SDK: list installed plugins with verification status (headless
+/// twin of the Tauri `list_plugins` command: same `discover()` backend,
+/// same fail-closed statuses). Sorted by id for stable script output.
+pub fn plugin_list(root: &str) -> Result<String, String> {
+    validate_cli_path(root, "root")?;
+    let library =
+        hexforge_plugin_host::store::PluginLibrary::new(std::path::PathBuf::from(root), Vec::new());
+    let mut entries = library.discover();
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+    if entries.is_empty() {
+        return Ok(format!("no plugins installed under '{root}'"));
+    }
+    let lines: Vec<String> = entries
+        .iter()
+        .map(|entry| {
+            let (version, requested, granted) = match &entry.manifest {
+                Some(manifest) => (
+                    manifest.version.clone(),
+                    manifest.requested_capabilities.join(","),
+                    manifest.granted_capabilities.join(","),
+                ),
+                None => ("?".into(), String::new(), String::new()),
+            };
+            let mut line = format!(
+                "{id} version={version} status={status:?} requested=[{requested}] granted=[{granted}]",
+                id = entry.id,
+                status = entry.status,
+            );
+            if let Some(reason) = &entry.error {
+                line.push_str(&format!(" error={reason}"));
+            }
+            line
+        })
+        .collect();
+    Ok(lines.join("\n"))
+}

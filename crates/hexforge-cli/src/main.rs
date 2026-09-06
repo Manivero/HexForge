@@ -323,14 +323,46 @@ fn main() {
                     }
                 }
             }
+            "list" => {
+                // plugin list --root <dir>
+                let mut root: Option<&str> = None;
+                let mut i = 0;
+                while i < rest.len() {
+                    match rest[i].as_str() {
+                        "--root" => {
+                            if i + 1 >= rest.len() {
+                                eprintln!("error: --root requires an argument");
+                                std::process::exit(2);
+                            }
+                            root = Some(&rest[i + 1]);
+                            i += 2;
+                        }
+                        other => {
+                            eprintln!("error: unexpected argument '{other}'");
+                            std::process::exit(2);
+                        }
+                    }
+                }
+                let Some(root) = root else {
+                    eprintln!("error: usage: hexforge-cli plugin list --root <dir>");
+                    std::process::exit(2);
+                };
+                match hexforge_cli::plugin_list(root) {
+                    Ok(msg) => println!("{msg}"),
+                    Err(message) => {
+                        eprintln!("error: {message}");
+                        std::process::exit(1);
+                    }
+                }
+            }
             other => {
-                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate|new|install|grant|revoke|run)");
+                eprintln!("error: unknown plugin subcommand '{other}' (keygen|bind|sign|validate|new|install|grant|revoke|run|list)");
                 std::process::exit(2);
             }
         },
         _ => {
             eprintln!(
-                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin new <dir> [--id <id>] [--name <name>]\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>\n  hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]\n  hexforge-cli plugin grant|revoke <id> --root <dir> --cap <cap>\n  hexforge-cli plugin run <id> --root <dir> --in <file> --out <file>"
+                "Usage:\n  hexforge-cli run <recipe.hexforge> --in <file> [--in <file> ...] --out <file>\n  hexforge-cli validate <recipe.hexforge>\n  hexforge-cli plugin keygen\n  hexforge-cli plugin new <dir> [--id <id>] [--name <name>]\n  hexforge-cli plugin bind <manifest.json> <plugin.wasm>\n  hexforge-cli plugin sign <manifest.json> --key <hex>\n  hexforge-cli plugin validate <manifest.json>\n  hexforge-cli plugin install <plugin.wasm> <manifest.json> --root <dir> [--sig <hex> --pub <hex>]\n  hexforge-cli plugin grant|revoke <id> --root <dir> --cap <cap>\n  hexforge-cli plugin run <id> --root <dir> --in <file> --out <file>\n  hexforge-cli plugin list --root <dir>"
             );
             std::process::exit(2);
         }

@@ -35,7 +35,13 @@ hexforge-cli plugin sign manifest.json --key <signing_key>
 hexforge-cli plugin install plugin.wasm manifest.json \
   --root /tmp/plugin-lib --sig <sig> --pub <pubkey>
 
-# 7. grant capabilities in the app (Plugins panel) or via IPC, then execute.
+# 7. grant capabilities + execute, headless (same backend as the app UI).
+# grant only accepts caps the manifest requests (else 'never requested').
+hexforge-cli plugin list --root /tmp/plugin-lib
+hexforge-cli plugin grant acme.demo --root /tmp/plugin-lib --cap network
+hexforge-cli plugin run acme.demo --root /tmp/plugin-lib \
+  --in input.bin --out output.bin
+hexforge-cli plugin revoke acme.demo --root /tmp/plugin-lib --cap network
 ```
 
 ## Rules (enforced, not advisory)
@@ -69,7 +75,10 @@ wit-bindgen 0.36). After any rebuild: re-`bind` the manifest, then run
 
 ```sh
 cargo test -p hexforge-plugin-host --test sdk_lifecycle
+cargo test -p hexforge-plugin-host --test template_drift
 cargo test -p hexforge-cli --test plugin_tools
+cargo test -p hexforge-cli --test plugin_grant_run
+cargo test -p hexforge-cli --test plugin_list
 ```
 
 The sync test fails if `plugin.wasm` and `manifest.json` drift apart.
