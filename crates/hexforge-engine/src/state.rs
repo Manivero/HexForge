@@ -147,6 +147,8 @@ pub struct OutputCache {
 
 struct CacheEntry {
     output: Arc<Vec<u8>>,
+    /// Source handles this entry was derived from. Empty = no binding (e.g. pure computation).
+    source_handles: Vec<Uuid>,
 }
 
 impl OutputCache {
@@ -197,7 +199,7 @@ impl OutputCache {
 
     /// Вставляет выход; при превышении бюджета вытесняет наименее используемые
     /// записи (фронт LRU-очереди). Результат больше бюджета не кэшируется.
-    pub fn put(&mut self, key: String, output: Arc<Vec<u8>>) {
+    pub fn put(&mut self, key: String, output: Arc<Vec<u8>>, source_handles: Vec<Uuid>) {
         let size = output.len();
         if size > self.max_bytes {
             return;
@@ -222,7 +224,13 @@ impl OutputCache {
                 self.order.remove(pos);
             }
             self.used_bytes = self.used_bytes.saturating_sub(old_size) + size;
-            self.entries.insert(key.clone(), CacheEntry { output });
+            self.entries.insert(
+                key.clone(),
+                CacheEntry {
+                    output,
+                    source_handles,
+                },
+            );
             self.order.push_back(key);
             return;
         }
@@ -234,9 +242,34 @@ impl OutputCache {
                 self.used_bytes = self.used_bytes.saturating_sub(evicted.output.len());
             }
         }
-        self.entries.insert(key.clone(), CacheEntry { output });
+        self.entries.insert(
+            key.clone(),
+            CacheEntry {
+                output,
+                source_handles,
+            },
+        );
         self.used_bytes += size;
         self.order.push_back(key);
+    }
+
+    /// Инвалидирует только записи, зависящие от указанного source handle.
+    /// Записи без привязки к источникам (пустой source_handles) остаются в кэше.
+    pub fn invalidate_for_source(&mut self, handle: Uuid) {
+        let keys_to_remove: Vec<String> = self
+            .entries
+            .iter()
+            .filter(|(_, entry)| entry.source_handles.contains(&handle))
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in &keys_to_remove {
+            if let Some(entry) = self.entries.remove(key) {
+                self.used_bytes = self.used_bytes.saturating_sub(entry.output.len());
+                if let Some(pos) = self.order.iter().position(|k| k == key) {
+                    self.order.remove(pos);
+                }
+            }
+        }
     }
 }
 
@@ -384,15 +417,15 @@ mod tests {
         assert!(cache.get("k1").is_none());
         assert_eq!(cache.misses, 1);
 
-        cache.put("k1".into(), Arc::new(vec![0; 60]));
-        cache.put("k2".into(), Arc::new(vec![0; 30]));
+        cache.put("k1".into(), Arc::new(vec![0; 60]), vec![]);
+        cache.put("k2".into(), Arc::new(vec![0; 30]), vec![]);
         let hit = cache.get("k1").expect("fresh entry must hit");
         assert_eq!(hit.len(), 60);
         assert_eq!(cache.hits, 1);
 
         // LRU: после hit k1 порядок [k2, k1]; вставка k3 (20 байт) вытеснит k2 (давно неиспользуемый),
         // а k1 (недавно использованный) останется — 90+20 >100 → evict k2 → used 80.
-        cache.put("k3".into(), Arc::new(vec![0; 20]));
+        cache.put("k3".into(), Arc::new(vec![0; 20]), vec![]);
         assert!(
             cache.get("k2").is_none(),
             "LRU: давно неиспользуемый k2 должен быть вытеснен первым"
@@ -404,7 +437,7 @@ mod tests {
         assert!(cache.get("k3").is_some());
 
         // Результат больше бюджета не кэшируется вовсе.
-        cache.put("huge".into(), Arc::new(vec![0; 500]));
+        cache.put("huge".into(), Arc::new(vec![0; 500]), vec![]);
         assert!(cache.get("huge").is_none());
     }
 
@@ -412,13 +445,13 @@ mod tests {
     fn output_cache_lru_updates_on_hit() {
         // Более прямой тест LRU: k1,k2,k3 вставить, затем хитнуть k1, затем k4 вытесняет k2
         let mut cache = OutputCache::new(90);
-        cache.put("k1".into(), Arc::new(vec![0; 30]));
-        cache.put("k2".into(), Arc::new(vec![0; 30]));
-        cache.put("k3".into(), Arc::new(vec![0; 30]));
+        cache.put("k1".into(), Arc::new(vec![0; 30]), vec![]);
+        cache.put("k2".into(), Arc::new(vec![0; 30]), vec![]);
+        cache.put("k3".into(), Arc::new(vec![0; 30]), vec![]);
         // order [k1,k2,k3]
         cache.get("k1");
         // order теперь [k2,k3,k1]
-        cache.put("k4".into(), Arc::new(vec![0; 30]));
+        cache.put("k4".into(), Arc::new(vec![0; 30]), vec![]);
         // нужно вытеснить 30 байт → evict k2
         assert!(
             cache.get("k2").is_none(),
@@ -432,14 +465,14 @@ mod tests {
     #[test]
     fn output_cache_put_duplicate_updates_lru_and_bytes() {
         let mut cache = OutputCache::new(100);
-        cache.put("k1".into(), Arc::new(vec![0; 40]));
-        cache.put("k2".into(), Arc::new(vec![0; 40]));
+        cache.put("k1".into(), Arc::new(vec![0; 40]), vec![]);
+        cache.put("k2".into(), Arc::new(vec![0; 40]), vec![]);
         // Перезаписать k1 большим значением 50 байт — used должен пересчитаться
-        cache.put("k1".into(), Arc::new(vec![1; 50]));
+        cache.put("k1".into(), Arc::new(vec![1; 50]), vec![]);
         assert_eq!(cache.used_bytes, 90);
         assert_eq!(cache.entries_len(), 2);
         // k1 теперь MRU, order [k2, k1]; вставка 20 байт вытеснит k2
-        cache.put("k3".into(), Arc::new(vec![0; 20]));
+        cache.put("k3".into(), Arc::new(vec![0; 20]), vec![]);
         assert!(cache.get("k2").is_none());
         assert!(cache.get("k1").is_some());
     }
@@ -527,11 +560,53 @@ mod tests {
     #[test]
     fn output_cache_clear_invalidates_everything() {
         let mut cache = OutputCache::new(100);
-        cache.put("k".into(), Arc::new(vec![0; 10]));
+        cache.put("k".into(), Arc::new(vec![0; 10]), vec![]);
         assert!(cache.get("k").is_some());
 
         cache.clear();
         assert!(cache.get("k").is_none(), "после clear старых hit'ов нет");
+        assert_eq!(cache.entries_len(), 0);
+    }
+
+    #[test]
+    fn output_cache_invalidate_for_source_keeps_independent_entries() {
+        let mut cache = OutputCache::new(1000);
+        let handle_a = Uuid::new_v4();
+        let handle_b = Uuid::new_v4();
+        let handle_c = Uuid::new_v4();
+
+        // Три записи: две зависят от handle_a, одна — от handle_b
+        cache.put("entry_a1".into(), Arc::new(vec![0; 100]), vec![handle_a]);
+        cache.put("entry_a2".into(), Arc::new(vec![0; 100]), vec![handle_a]);
+        cache.put("entry_b1".into(), Arc::new(vec![0; 100]), vec![handle_b]);
+
+        assert_eq!(cache.entries_len(), 3);
+
+        // Инвалидируем только handle_a — должны остаться entry_b1
+        cache.invalidate_for_source(handle_a);
+
+        assert!(cache.get("entry_a1").is_none());
+        assert!(cache.get("entry_a2").is_none());
+        assert!(
+            cache.get("entry_b1").is_some(),
+            "entry_b1 не должен быть затронут"
+        );
+        assert_eq!(cache.entries_len(), 1);
+
+        // Инвалидация неизвестного handle — no-op
+        cache.invalidate_for_source(handle_c);
+        assert_eq!(cache.entries_len(), 1);
+        assert!(cache.get("entry_b1").is_some());
+    }
+
+    #[test]
+    fn output_cache_put_oversized_entry_rejected() {
+        let mut cache = OutputCache::new(100);
+        cache.put("huge".into(), Arc::new(vec![0; 500]), vec![]);
+        assert!(
+            cache.get("huge").is_none(),
+            "oversized entry must not be cached"
+        );
         assert_eq!(cache.entries_len(), 0);
     }
 

@@ -228,10 +228,25 @@ fn resolve_node_with_snapshot(
         execute_unary_node(&node, state, token, Arc::clone(&inputs[0]))?
     };
 
+    // Collect source handles from inputs for cache invalidation tracking.
+    // For source nodes (inputs.len() == 0), the source handle is in node.params.
+    let source_handles = if node.inputs.is_empty() {
+        node.params
+            .get("sourceHandle")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .into_iter()
+            .collect::<Vec<_>>()
+    } else {
+        // For transform nodes, we'd need to track transitively from input snapshots.
+        // For now, empty vec - can be enhanced later with snapshot->source mapping.
+        vec![]
+    };
+
     state
         .cache
         .lock()
-        .put(cache_key.clone(), Arc::clone(&output));
+        .put(cache_key.clone(), Arc::clone(&output), source_handles);
     emit_progress(on_progress, node_id, output.len());
     let input_hashes_opt = if input_hashes.len() > 1 {
         Some(input_hashes.clone())
@@ -586,7 +601,7 @@ fn finalize_fused(
         &st.node.params,
     );
     let arc = Arc::new(final_output);
-    state.cache.lock().put(key, Arc::clone(&arc));
+    state.cache.lock().put(key, Arc::clone(&arc), vec![]);
     drop(st);
     arc
 }

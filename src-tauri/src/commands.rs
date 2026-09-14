@@ -319,9 +319,9 @@ pub async fn patch_source(
         ),
     })?;
 
-    // Консервативная инвалидация кэша (см. OutputCache::clear): патч меняет
-    // байты за хэндлом — прежние content-hash ключи больше не соответствуют.
-    state.cache.lock().clear();
+    // Селективная инвалидация кэша: удаляем только записи, зависящие от патчнутого источника.
+    // Записи без привязки к источникам (пустой source_handles) остаются в кэше.
+    state.cache.lock().invalidate_for_source(handle);
 
     // FR-1.6: потребители патчнутого источника устарели — уведомляем UI.
     let stale = hexforge_engine::scheduler::compute_invalidated_for_source(
