@@ -299,8 +299,11 @@ impl AppState {
     }
 
     /// Регистрирует динамическую операцию (плагин) в реестре.
-    pub fn register_plugin(&self, transform: &'static dyn hexforge_core::Transform) {
-        self.registry.write().register(transform);
+    pub fn register_plugin(
+        &self,
+        transform: &'static dyn hexforge_core::Transform,
+    ) -> Result<(), String> {
+        self.registry.write().register_plugin(transform)
     }
 
     /// Регистрирует merge-операцию плагина.

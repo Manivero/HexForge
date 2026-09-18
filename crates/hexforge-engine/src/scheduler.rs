@@ -279,6 +279,21 @@ fn resolve_source_input(
     Ok(Arc::new(entry.as_bytes().to_vec()))
 }
 
+/// Execution-time hint for an operation id absent from the registry.
+/// Plugin nodes (`plugin:<id>`) name the missing plugin, the pinned version
+/// and the remedy instead of a generic "unknown operation"; anything else
+/// keeps the historical message.
+fn missing_operation_hint(node: &OperationNode) -> String {
+    if let Some(manifest_id) = node.operation_id.strip_prefix("plugin:") {
+        return format!(
+            "plugin '{manifest_id}' version {} is not installed: install the required plugin \
+             (see the recipe 'requiredPlugins') and restart the app, then re-run",
+            node.operation_version
+        );
+    }
+    format!("unknown operation: {}", node.operation_id)
+}
+
 fn lookup_transform(
     node: &OperationNode,
     state: &AppState,
@@ -287,12 +302,7 @@ fn lookup_transform(
         .registry
         .read()
         .get(&node.operation_id)
-        .ok_or_else(|| {
-            HexForgeError::internal_for_node(
-                node.id,
-                format!("unknown operation: {}", node.operation_id),
-            )
-        })?;
+        .ok_or_else(|| HexForgeError::internal_for_node(node.id, missing_operation_hint(node)))?;
     if transform.version() != node.operation_version {
         return Err(HexForgeError::internal_for_node(
             node.id,

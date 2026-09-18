@@ -38,6 +38,19 @@ pub const WIT_PACKAGE: &str = "hexforge:plugin";
 /// Supported WIT interface version (semver `major.minor`).
 pub const WIT_VERSION: &str = "0.1.0";
 
+/// Canonical operation namespace for plugin transforms: every registered
+/// plugin operation id is `plugin:<manifest-id>`. The prefix makes plugin
+/// origin structural (no builtin id can collide) and is applied by the host
+/// at `PluginTransform` construction — never by plugin authors, and the WIT
+/// `get-id` stays bare.
+pub const PLUGIN_OP_PREFIX: &str = "plugin:";
+
+/// Canonical registry id for a plugin manifest id. Single source of the
+/// `plugin:<id>` rule shared by registration, scheduler diagnostics and tests.
+pub fn canonical_op_id(manifest_id: &str) -> String {
+    format!("{PLUGIN_OP_PREFIX}{manifest_id}")
+}
+
 // WIT Component Model bindings — host calls plugin's exported `transform` interface.
 // The WIT file is at `wit/plugin.wit` (world `hexforge-plugin`).
 // For core modules (legacy tests) we fallback to echo behavior.
@@ -248,6 +261,20 @@ impl PluginRuntime {
         matches!(cap, "filesystem_read" | "filesystem_write" | "network")
     }
 
+    /// Capability check against LIVE on-disk grants, not the instance
+    /// snapshot. Grant/revoke only rewrite `grants.json`; long-lived
+    /// registered transforms would otherwise enforce stale caps until
+    /// restart. Missing/unreadable grants fail closed (privileged caps
+    /// denied, privilege-free plugins unaffected).
+    fn check_capabilities_live(
+        manifest: &PluginManifest,
+        wasm_path: &str,
+    ) -> Result<(), PluginError> {
+        let mut live = manifest.clone();
+        live.granted_capabilities = crate::store::live_effective_grants(manifest, wasm_path);
+        Self::check_capabilities(&live)
+    }
+
     /// Verifies that all requested privileged capabilities are granted
     fn check_capabilities(manifest: &PluginManifest) -> Result<(), PluginError> {
         for cap in &manifest.requested_capabilities {
@@ -306,7 +333,11 @@ impl PluginRuntime {
             )));
         }
 
-        // 4. Capability check — privileged caps must be granted
+        // 4. Capability check against the signed manifest snapshot: this
+        // validates a STAGED artifact (arbitrary temp path, no package dir
+        // and no grants.json yet — the just-verified signature over the
+        // manifest bytes is the source of truth here). Execution paths
+        // below re-check against live on-disk grants instead.
         Self::check_capabilities(&manifest).map_err(|e| anyhow!(e))?;
 
         Ok(PluginInstance {
@@ -321,8 +352,9 @@ impl PluginRuntime {
     /// Tries Component Model WIT `transform.apply` first; falls back to core module `run` echo for legacy tests.
     /// For non-component plugins that export `transform` via core ABI, we also support direct memory call via component fallback.
     pub fn execute(&self, instance: &PluginInstance, input: &[u8]) -> Result<Vec<u8>> {
-        // 1. Capability sandbox — re-check before execution (defense in depth)
-        Self::check_capabilities(&instance.manifest).map_err(|e| anyhow!(e))?;
+        // 1. Capability sandbox — re-check LIVE grants before execution (defense in depth)
+        Self::check_capabilities_live(&instance.manifest, &instance.wasm_path)
+            .map_err(|e| anyhow!(e))?;
 
         // 2. Try Component Model WIT path first (preferred, production)
         match self.execute_component(instance, input, &serde_json::json!({}).to_string()) {
@@ -646,7 +678,7 @@ impl PluginTransform {
             return Ok(Self {
                 runtime,
                 instance: wit_meta.0,
-                id: Self::retain_metadata(wit_meta.1),
+                id: Self::retain_metadata(crate::canonical_op_id(&wit_meta.1)),
                 version: Self::retain_metadata(wit_meta.2),
                 display_name: Self::retain_metadata(wit_meta.3),
                 category: Self::retain_metadata(wit_meta.4),
@@ -655,7 +687,7 @@ impl PluginTransform {
             });
         }
         // Fallback to manifest
-        let id = instance.manifest.id.clone();
+        let id = crate::canonical_op_id(&instance.manifest.id);
         let version = instance.manifest.version.clone();
         let display_name = instance.manifest.name.clone();
         let category = "Plugin".to_string();
@@ -862,6 +894,10 @@ impl Transform for PluginTransform {
         self.capabilities.clone()
     }
 
+    fn origin(&self) -> &'static str {
+        "plugin"
+    }
+
     fn apply<'a>(
         &self,
         input: ByteView<'a>,
@@ -940,7 +976,8 @@ impl PluginRuntime {
         input: &[u8],
         params_json: &str,
     ) -> Result<Vec<u8>> {
-        Self::check_capabilities(&instance.manifest).map_err(|e| anyhow!(e))?;
+        Self::check_capabilities_live(&instance.manifest, &instance.wasm_path)
+            .map_err(|e| anyhow!(e))?;
 
         let mut store = Store::new(&self.engine, HostState::new(self.max_memory_bytes));
         store.limiter(|s| &mut s.limiter);
@@ -1941,7 +1978,7 @@ mod tests {
         // Transform exposes static metadata because the registry keeps dynamic
         // plugin transforms for the process lifetime. These references must
         // remain valid even if a standalone wrapper is dropped first.
-        assert_eq!(id, "custom.test");
+        assert_eq!(id, "plugin:custom.test");
         assert_eq!(version, "2.3.4");
         assert_eq!(display_name, "Custom Test");
         assert_eq!(category, "Plugin");
@@ -2066,7 +2103,7 @@ mod tests {
         };
         let transform = runtime.clone().as_transform(instance).unwrap();
         // Verify metadata via Transform trait (from manifest, since WIT not yet used for this core module)
-        assert_eq!(transform.id(), "wit.test");
+        assert_eq!(transform.id(), "plugin:wit.test");
         assert_eq!(transform.version(), "1.0.0");
         assert_eq!(transform.display_name(), "WIT Test");
         assert_eq!(transform.category(), "Plugin");

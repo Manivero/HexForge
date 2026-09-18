@@ -260,7 +260,9 @@ fn phase_verify_execute_after_restart() {
         let leaked: Box<dyn hexforge_core::Transform> = Box::new(pt);
         Box::leak(leaked)
     };
-    app_state.register_plugin(registered);
+    app_state
+        .register_plugin(registered)
+        .expect("single test plugin registers");
     let input = b"restart-probe-input";
     let out = registered
         .apply(

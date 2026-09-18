@@ -24,6 +24,31 @@ pub struct OperationNodeDto {
 #[serde(rename_all = "camelCase")]
 pub struct GraphDto {
     pub nodes: HashMap<String, OperationNodeDto>,
+    /// Plugin dependencies declared by `export_recipe` (metadata only, never
+    /// bundled artifacts). `#[serde(default)]` keeps pre-plugin recipe files
+    /// readable: absence means "no declared dependencies", not an error.
+    #[serde(default)]
+    pub required_plugins: Vec<PluginDependency>,
+}
+
+/// One recipe-level plugin dependency: canonical operation id
+/// (`plugin:<manifest-id>`) + the exact pinned version. Checked (not
+/// enforced) at import; enforced by the scheduler's strict version gate.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDependency {
+    pub id: String,
+    pub version: String,
+}
+
+/// Missing/unmet plugin dependency reported at import (warning, not hidden)
+/// and enforced at execution by the scheduler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingPlugin {
+    pub id: String,
+    pub version: String,
+    pub reason: String,
 }
 
 impl TryFrom<GraphDto> for Graph {
@@ -115,7 +140,11 @@ mod tests {
         // в один узел (потеря данных рецепта без ошибки).
         nodes.insert("other-key".to_string(), dto_node(real));
         nodes.insert(real.to_string(), dto_node(real));
-        let err = Graph::try_from(GraphDto { nodes }).unwrap_err();
+        let err = Graph::try_from(GraphDto {
+            nodes,
+            required_plugins: Vec::new(),
+        })
+        .unwrap_err();
         assert!(
             err.message.contains("does not match node.id"),
             "unexpected error: {err:?}"
@@ -127,7 +156,11 @@ mod tests {
         let real = "00000000-0000-4000-8000-000000000001";
         let mut nodes = HashMap::new();
         nodes.insert(real.to_string(), dto_node(real));
-        let graph = Graph::try_from(GraphDto { nodes }).expect("matching key/id must convert");
+        let graph = Graph::try_from(GraphDto {
+            nodes,
+            required_plugins: Vec::new(),
+        })
+        .expect("matching key/id must convert");
         assert_eq!(graph.nodes.len(), 1);
     }
 }

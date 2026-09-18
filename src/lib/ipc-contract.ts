@@ -43,6 +43,9 @@ export interface OperationDescriptor {
   category: string;
   paramsSchema: unknown;
   capabilities: TransformCapabilities;
+  /** Operation origin: "builtin" or "plugin". Always sent by the backend;
+   * older saved payloads without it mean "builtin". */
+  origin: string;
 }
 
 export interface OperationNodeDto {
@@ -55,6 +58,14 @@ export interface OperationNodeDto {
 
 export interface GraphDto {
   nodes: Record<NodeId, OperationNodeDto>;
+  /** Declared plugin dependencies (metadata only, never bundled artifacts).
+   * Written by recipe export; absent in pre-plugin recipe files. */
+  requiredPlugins?: PluginDependency[];
+}
+
+export interface PluginDependency {
+  id: string;
+  version: string;
 }
 
 export type HexForgeErrorKind =
@@ -189,6 +200,13 @@ export interface ImportRecipeRequest {
 export interface ImportRecipeResponse {
   graph: GraphDto;
   missingOperations: string[];
+  missingPlugins: MissingPlugin[];
+}
+
+export interface MissingPlugin {
+  id: string;
+  version: string;
+  reason: string;
 }
 export interface ImportCyberChefRecipeRequest {
   sourcePath: string;

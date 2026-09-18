@@ -1,4 +1,4 @@
-import type { OperationDescriptor } from "@/lib/ipc-contract";
+import type { OperationDescriptor } from "../../lib/ipc-contract";
 
 export type CommandGroupId = "app" | "operations";
 
@@ -69,8 +69,9 @@ export function operationsToCommands(
     id: `op.${op.id}`,
     groupId: "operations",
     label: op.displayName,
-    hint: op.category,
-    keywords: [op.category, op.id],
+    hint: op.origin === "plugin" ? `${op.category} • plugin` : op.category,
+    keywords:
+      op.origin === "plugin" ? [op.category, op.id, "plugin"] : [op.category, op.id],
     run: () => onSelect(op),
   }));
 }

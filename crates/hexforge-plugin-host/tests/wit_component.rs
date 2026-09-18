@@ -75,8 +75,8 @@ fn wit_component_metadata_comes_from_exports() {
     let instance = install_component(&runtime, &wasm_path, &fallback_manifest());
 
     let transform = runtime.clone().as_transform(instance).unwrap();
-    // WIT values — NOT the manifest fallback.
-    assert_eq!(transform.id(), "comp.uppercase");
+    // WIT values — NOT the manifest fallback (canonical plugin namespace).
+    assert_eq!(transform.id(), "plugin:comp.uppercase");
     assert_eq!(transform.version(), "1.0.0");
     assert_eq!(transform.display_name(), "Comp Uppercase");
     assert_eq!(transform.category(), "Text");
@@ -133,9 +133,9 @@ fn wit_foreign_component_falls_back_and_refuses_execute() {
     let runtime = Arc::new(PluginRuntime::new(None).unwrap());
     let instance = install_component(&runtime, &wasm_path, &fallback_manifest());
 
-    // No transform interface → manifest fallback, no hang, no panic.
+    // No transform interface → manifest fallback (still canonical plugin id), no hang, no panic.
     let transform = runtime.clone().as_transform(instance.clone()).unwrap();
-    assert_eq!(transform.id(), "manifest.fallback");
+    assert_eq!(transform.id(), "plugin:manifest.fallback");
 
     // …and execution refuses explicitly instead of running the unknown export.
     let err = runtime.execute(&instance, b"test").unwrap_err();

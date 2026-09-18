@@ -18,6 +18,7 @@
     "src/lib/ipc-contract.ts",
     "src/lib/ipc.ts",
     "src/lib/plugins.ts",
+    "src/components/CommandPalette/commands.ts",
     "src/lib/utils.ts"
   ]
 }

@@ -619,14 +619,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
   importRecipe: async (sourcePath) => {
     try {
       const resp = await ipcImportRecipe({ sourcePath });
-      const missing = resp.missingOperations;
+      const missing = resp.missingOperations ?? [];
+      const missingPlugins = resp.missingPlugins ?? [];
+      const problems: string[] = [];
       if (missing.length > 0) {
-        set({
-          runError: t(get().locale, "app.missingOps", { ops: missing.join(", ") }),
-        });
-      } else {
-        set({ runError: null });
+        problems.push(t(get().locale, "app.missingOps", { ops: missing.join(", ") }));
       }
+      if (missingPlugins.length > 0) {
+        problems.push(
+          t(get().locale, "app.missingPlugins", {
+            plugins: missingPlugins.map((p) => `${p.id}@${p.version}`).join(", "),
+          }),
+        );
+      }
+      set({ runError: problems.length > 0 ? problems.join(" | ") : null });
       set((s) => ({
         nodes: resp.graph.nodes as Record<string, OperationNodeDto>,
         selectedNodeId: null,

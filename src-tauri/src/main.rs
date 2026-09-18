@@ -71,9 +71,17 @@ fn main() {
                         let leaked: Box<dyn hexforge_core::Transform> = Box::new(pt);
                         let static_ref: &'static dyn hexforge_core::Transform = Box::leak(leaked);
                         let id = static_ref.id().to_string();
-                        state.register_plugin(static_ref);
-                        verified += 1;
-                        eprintln!("[hexforge-plugin-host] registered plugin transform: {id}");
+                        match state.register_plugin(static_ref) {
+                            Ok(()) => {
+                                verified += 1;
+                                eprintln!(
+                                    "[hexforge-plugin-host] registered plugin transform: {id}"
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("[hexforge-plugin-host] skipping plugin transform: {e}");
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!(
