@@ -5,6 +5,7 @@ pub mod base64;
 pub mod base85;
 pub mod hex;
 pub mod json;
+pub mod magic_wand;
 pub mod msgpack;
 pub mod protobuf;
 pub mod quoted_printable;
