@@ -194,6 +194,14 @@ export interface ExportRecipeRequest {
   graph: GraphDto;
   targetPath: string;
 }
+export interface ExportCyberChefRecipeRequest {
+  graph: GraphDto;
+  targetPath: string;
+}
+export interface ExportCyberChefRecipeResponse {
+  content: string;
+  warnings: string[];
+}
 export interface ImportRecipeRequest {
   sourcePath: string;
 }

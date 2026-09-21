@@ -4,7 +4,7 @@
 //! обеспечивает совпадение имён полей с TS без ручного маппинга.
 
 use base64::{engine::general_purpose, Engine as _};
-use hexforge_core::graph::Graph;
+use hexforge_core::graph::{Graph, NodeId};
 use hexforge_engine::error::{HexForgeError, HexForgeResult};
 use hexforge_engine::graph_dto::{GraphDto, MissingPlugin, PluginDependency};
 use hexforge_engine::scheduler;
@@ -754,7 +754,7 @@ fn check_required_plugins(state: &AppState, deps: &[PluginDependency]) -> Vec<Mi
     out
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct CyberChefOp {
     op: String,
     args: Vec<serde_json::Value>,
@@ -775,9 +775,263 @@ pub struct ImportCyberChefRecipeResponse {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ExportCyberChefRecipeResponse {
+    pub content: String,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UnmappedOp {
     pub cyber_chef_id: String,
     pub reason: String,
+}
+
+/// Экспорт графа в формат CyberChef recipe (JSON-массив [{ "op": "...", "args": [...] }]).
+/// CyberChef recipe — линейная последовательность операций; граф, который не является
+/// single linear chain (fork/merge/multi-input), отклоняется с диагностикой, а не молча
+/// усекается — это предотвращает silent data loss. Не-маппируемые операции попадают в
+/// warnings (файл всё ещё создаётся, но пользователь видит, что часть операций не
+/// экспортировалась — best-effort по FR-7.2).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportCyberChefRecipeRequest {
+    pub graph: GraphDto,
+    pub target_path: String,
+}
+
+fn cyberchef_export_op_name(hexforge_id: &str, params: &serde_json::Value) -> Option<CyberChefOp> {
+    match hexforge_id {
+        "encoding.base64.encode" => Some(CyberChefOp {
+            op: "To Base64".into(),
+            args: vec![],
+        }),
+        "encoding.base64.decode" => Some(CyberChefOp {
+            op: "From Base64".into(),
+            args: vec![],
+        }),
+        "encoding.hex.encode" => Some(CyberChefOp {
+            op: "To Hex".into(),
+            args: vec![],
+        }),
+        "encoding.hex.decode" => Some(CyberChefOp {
+            op: "From Hex".into(),
+            args: vec![],
+        }),
+        "encoding.base32.encode" => Some(CyberChefOp {
+            op: "To Base32".into(),
+            args: vec![],
+        }),
+        "encoding.base32.decode" => Some(CyberChefOp {
+            op: "From Base32".into(),
+            args: vec![],
+        }),
+        "text.rot13" => Some(CyberChefOp {
+            op: "ROT13".into(),
+            args: vec![],
+        }),
+        "text.reverse" => Some(CyberChefOp {
+            op: "Reverse".into(),
+            args: vec![],
+        }),
+        "network.url_encode" => Some(CyberChefOp {
+            op: "URL Encode".into(),
+            args: vec![],
+        }),
+        "network.url_decode" => Some(CyberChefOp {
+            op: "URL Decode".into(),
+            args: vec![],
+        }),
+        "compression.gzip.compress" => Some(CyberChefOp {
+            op: "Gzip Compress".into(),
+            args: vec![],
+        }),
+        "compression.gzip.decompress" => Some(CyberChefOp {
+            op: "Gzip Decompress".into(),
+            args: vec![],
+        }),
+        "compression.zlib.compress" => Some(CyberChefOp {
+            op: "Zlib Deflate".into(),
+            args: vec![],
+        }),
+        "compression.zlib.decompress" => Some(CyberChefOp {
+            op: "Zlib Inflate".into(),
+            args: vec![],
+        }),
+        "compression.bzip2.compress" => Some(CyberChefOp {
+            op: "Bzip2 Compress".into(),
+            args: vec![],
+        }),
+        "compression.bzip2.decompress" => Some(CyberChefOp {
+            op: "Bzip2 Decompress".into(),
+            args: vec![],
+        }),
+        "compression.lzma.compress" => Some(CyberChefOp {
+            op: "LZMA Compress".into(),
+            args: vec![],
+        }),
+        "compression.lzma.decompress" => Some(CyberChefOp {
+            op: "LZMA Decompress".into(),
+            args: vec![],
+        }),
+        "crypto.xor" => {
+            let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("key");
+            Some(CyberChefOp {
+                op: "XOR".into(),
+                args: vec![serde_json::json!({"key": key})],
+            })
+        }
+        "hashing.md5" => Some(CyberChefOp {
+            op: "MD5".into(),
+            args: vec![],
+        }),
+        "hashing.sha1" => Some(CyberChefOp {
+            op: "SHA1".into(),
+            args: vec![],
+        }),
+        "hashing.sha256" => Some(CyberChefOp {
+            op: "SHA256".into(),
+            args: vec![],
+        }),
+        "hashing.sha512" => Some(CyberChefOp {
+            op: "SHA512".into(),
+            args: vec![],
+        }),
+        "hashing.sha3_256" => Some(CyberChefOp {
+            op: "SHA3".into(),
+            args: vec![serde_json::json!(256)],
+        }),
+        "hashing.blake2b" => Some(CyberChefOp {
+            op: "BLAKE2b".into(),
+            args: vec![],
+        }),
+        "hashing.blake2s" => Some(CyberChefOp {
+            op: "BLAKE2s".into(),
+            args: vec![],
+        }),
+        "hashing.blake3" => Some(CyberChefOp {
+            op: "BLAKE3".into(),
+            args: vec![],
+        }),
+        "hashing.crc32" => Some(CyberChefOp {
+            op: "CRC32".into(),
+            args: vec![],
+        }),
+        "hashing.ssdeep" | "hashing.ssdeep_fuzzy" => Some(CyberChefOp {
+            op: "SSDEEP".into(),
+            args: vec![],
+        }),
+        "binary.entropy" => Some(CyberChefOp {
+            op: "Entropy".into(),
+            args: vec![],
+        }),
+        "binary.strings_extract" => Some(CyberChefOp {
+            op: "Strings".into(),
+            args: vec![],
+        }),
+        "binary.magic" => Some(CyberChefOp {
+            op: "Detect File Type".into(),
+            args: vec![],
+        }),
+        _ => None,
+    }
+}
+
+fn validate_cyberchef_exportable(graph: &Graph) -> Result<(), String> {
+    let sources: Vec<_> = graph
+        .nodes
+        .values()
+        .filter(|n| n.inputs.is_empty())
+        .collect();
+    if sources.len() != 1 {
+        return Err(format!(
+            "expected exactly one source node (no inputs) for CyberChef export; found {}",
+            sources.len()
+        ));
+    }
+    let mut children: std::collections::HashMap<NodeId, Vec<NodeId>> =
+        std::collections::HashMap::new();
+
+    for node in graph.nodes.values() {
+        if !node.inputs.is_empty() && node.inputs.len() != 1 {
+            return Err(format!(
+                "node '{}' has {} inputs (CyberChef recipe is linear; fork/merge not supported)",
+                node.id,
+                node.inputs.len()
+            ));
+        }
+        for input_id in &node.inputs {
+            children
+                .entry(input_id.clone())
+                .or_default()
+                .push(node.id.clone());
+        }
+    }
+
+    for (&parent, child_ids) in &children {
+        if child_ids.len() > 1 {
+            return Err(format!(
+                "fork at node '{}': {} downstream nodes (CyberChef recipe is linear; fork not supported)",
+                parent, child_ids.len()
+            ));
+        }
+    }
+    let reachable = graph.downstream_of(sources[0].id.clone());
+    if reachable.len() != graph.nodes.len() {
+        return Err(format!(
+            "graph has {} unreachable nodes from source (not a single connected linear chain)",
+            graph.nodes.len() - reachable.len()
+        ));
+    }
+    Ok(())
+}
+
+/// Экспорт рецепта в CyberChef-совместимый JSON (миграционный мост, FR-7.2).
+/// Валидирует, что граф является single linear chain (source → … → sink), иначе
+/// возвращает ошибку с причиной. Неподдерживаемые операции попадают в warnings
+/// (файл сохраняется, но пользователь видит диагностику).
+#[tauri::command]
+pub fn cyberchef_export_inner(
+    req: ExportCyberChefRecipeRequest,
+    state: &AppState,
+) -> HexForgeResult<ExportCyberChefRecipeResponse> {
+    validate_fs_path(&req.target_path, "targetPath")?;
+    let graph: Graph = req.graph.clone().try_into()?;
+    graph.topo_order().map_err(HexForgeError::from)?;
+    validate_cyberchef_exportable(&graph)
+        .map_err(|e| HexForgeError::invalid_input(format!("cannot export to CyberChef: {e}")))?;
+    let _registry = state.registry.read();
+    let mut ops = Vec::new();
+    let mut warnings = Vec::new();
+    for node_id in graph.topo_order().map_err(HexForgeError::from)? {
+        let node = graph.nodes.get(&node_id).unwrap();
+        match cyberchef_export_op_name(&node.operation_id, &node.params) {
+            Some(cyber_op) => ops.push(cyber_op),
+            None => warnings.push(format!(
+                "cannot map operation '{}' to any CyberChef op; omitted",
+                node.operation_id
+            )),
+        }
+    }
+    if ops.is_empty() {
+        return Err(HexForgeError::invalid_input(
+            "no CyberChef-mappable operations in graph",
+        ));
+    }
+    let content = serde_json::to_string_pretty(&ops)
+        .map_err(|e| HexForgeError::internal(format!("recipe serialization failed: {e}")))?;
+    std::fs::write(&req.target_path, content.as_bytes()).map_err(|e| {
+        HexForgeError::invalid_input(format!("cannot write '{}': {e}", req.target_path))
+    })?;
+    Ok(ExportCyberChefRecipeResponse { content, warnings })
+}
+
+#[tauri::command]
+pub fn export_cyberchef_recipe(
+    req: ExportCyberChefRecipeRequest,
+    state: State<'_, Arc<AppState>>,
+) -> HexForgeResult<ExportCyberChefRecipeResponse> {
+    cyberchef_export_inner(req, &state)
 }
 
 fn map_cyberchef_op(op: &str, _args: &[serde_json::Value]) -> Option<(String, serde_json::Value)> {
@@ -2227,6 +2481,156 @@ mod plugin_recipe_tests {
         .unwrap();
         assert!(resp.missing_plugins.is_empty());
         assert!(resp.missing_operations.is_empty());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    // ===== CyberChef export tests (FR-7.2) =====
+
+    fn cyberchef_node_dto(
+        id: &NodeId,
+        op: &str,
+        inputs: Vec<String>,
+    ) -> (String, OperationNodeDto) {
+        (
+            id.to_string(),
+            OperationNodeDto {
+                id: id.to_string(),
+                operation_id: op.into(),
+                operation_version: "1.0.0".into(),
+                params: serde_json::json!({}),
+                inputs,
+            },
+        )
+    }
+
+    fn cyberchef_export(
+        state: &AppState,
+        nodes: std::collections::HashMap<String, OperationNodeDto>,
+        target_path: std::path::PathBuf,
+    ) -> HexForgeResult<ExportCyberChefRecipeResponse> {
+        cyberchef_export_inner(
+            ExportCyberChefRecipeRequest {
+                graph: GraphDto {
+                    nodes,
+                    required_plugins: Vec::new(),
+                },
+                target_path: target_path.to_string_lossy().into_owned(),
+            },
+            state,
+        )
+    }
+
+    #[test]
+    fn export_linear_chain_of_builtin_ops() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let s = NodeId::new_v4();
+        let a = NodeId::new_v4();
+        let b = NodeId::new_v4();
+        let (k_s, n_s) = cyberchef_node_dto(&s, "encoding.base64.encode", vec![]);
+        let (k_a, n_a) = cyberchef_node_dto(&a, "encoding.hex.encode", vec![k_s.clone()]);
+        let (k_b, n_b) = cyberchef_node_dto(&b, "text.rot13", vec![k_a.clone()]);
+        let path = tmp_file("cc-export-linear");
+        let resp = cyberchef_export(
+            &state,
+            [(k_s, n_s), (k_a, n_a), (k_b, n_b)].into_iter().collect(),
+            path.clone(),
+        )
+        .unwrap();
+        assert!(resp.warnings.is_empty(), "warnings: {:?}", resp.warnings);
+        let parsed: serde_json::Value = serde_json::from_str(&resp.content).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0]["op"], "To Base64");
+        assert_eq!(arr[1]["op"], "To Hex");
+        assert_eq!(arr[2]["op"], "ROT13");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_fork_graph_is_rejected() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let s = NodeId::new_v4();
+        let f = NodeId::new_v4();
+        let a = NodeId::new_v4();
+        let b = NodeId::new_v4();
+        let (k_s, n_s) = cyberchef_node_dto(&s, "input.file", vec![]);
+        let (k_f, n_f) = cyberchef_node_dto(&f, "encoding.base64.encode", vec![k_s.clone()]);
+        let (k_a, n_a) = cyberchef_node_dto(&a, "encoding.hex.encode", vec![k_f.clone()]);
+        let (k_b, n_b) = cyberchef_node_dto(&b, "text.rot13", vec![k_f.clone()]);
+        let path = tmp_file("cc-export-fork");
+        let err = cyberchef_export(
+            &state,
+            [(k_s, n_s), (k_f, n_f), (k_a, n_a), (k_b, n_b)].into_iter().collect(),
+            path.clone(),
+        )
+        .unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(msg.contains("fork"), "expected fork error, got: {msg}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_merge_graph_is_rejected() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let s = NodeId::new_v4();
+        let a = NodeId::new_v4();
+        let m = NodeId::new_v4();
+        let (k_s, n_s) = cyberchef_node_dto(&s, "input.file", vec![]);
+        let (k_a, n_a) = cyberchef_node_dto(&a, "encoding.base64.encode", vec![k_s.clone()]);
+        let (k_m, n_m) = cyberchef_node_dto(&m, "encoding.hex.encode", vec![k_s.clone(), k_a.clone()]);
+        let path = tmp_file("cc-export-merge");
+        let err = cyberchef_export(
+            &state,
+            [(k_s, n_s), (k_a, n_a), (k_m, n_m)].into_iter().collect(),
+            path.clone(),
+        )
+        .unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(
+            msg.contains("inputs") || msg.contains("merge"),
+            "expected merge error, got: {msg}"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_unsupported_op_yields_warning() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let s = NodeId::new_v4();
+        let a = NodeId::new_v4();
+        let (k_s, n_s) = cyberchef_node_dto(&s, "encoding.base64.encode", vec![]);
+        let (k_a, n_a) = cyberchef_node_dto(&a, "crypto.aes.encrypt", vec![k_s.clone()]);
+        let path = tmp_file("cc-export-warn");
+        let resp = cyberchef_export(
+            &state,
+            [(k_s, n_s), (k_a, n_a)].into_iter().collect(),
+            path.clone(),
+        )
+        .unwrap();
+        assert_eq!(resp.warnings.len(), 1);
+        assert!(resp.warnings[0].contains("crypto.aes.encrypt"));
+        let parsed: serde_json::Value = serde_json::from_str(&resp.content).unwrap();
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["op"], "To Base64");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_empty_graph_is_rejected() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let path = tmp_file("cc-export-empty");
+        let err = cyberchef_export(
+            &state,
+            std::collections::HashMap::new(),
+            path.clone(),
+        )
+        .unwrap_err();
+        let msg = format!("{:?}", err);
+        assert!(
+            msg.contains("source"),
+            "expected source error, got: {msg}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

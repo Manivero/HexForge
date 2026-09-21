@@ -75,6 +75,18 @@ export function App() {
     await exportRecipe(path);
   }, [locale, exportRecipe]);
 
+  const exportCyberChefRecipe = useAppStore((s) => s.exportCyberChefRecipe);
+  const handleExportCyberChef = React.useCallback(async () => {
+    const path = window.prompt(t(locale, "app.exportCyberChefPrompt"), "recipe.cyberchef.json");
+    if (!path) return;
+    const resp = await exportCyberChefRecipe(path);
+    if (resp && resp.warnings.length > 0) {
+      window.alert(
+        t(locale, "app.exportCyberChefWarnings") + "\n" + resp.warnings.join("\n")
+      );
+    }
+  }, [locale, exportCyberChefRecipe]);
+
   const handleImport = React.useCallback(async () => {
     const path = window.prompt(t(locale, "app.importPrompt"), "recipe.hexforge");
     if (!path) return;
@@ -95,6 +107,13 @@ export function App() {
             aria-label="export recipe"
           >
             {t(locale, "app.export")}
+          </button>
+          <button
+            onClick={() => void handleExportCyberChef()}
+            className="rounded border border-border-subtle px-2 py-0.5 text-2xs hover:border-border-focus hover:text-accent"
+            aria-label="export cyberchef recipe"
+          >
+            {t(locale, "app.exportCyberChef")}
           </button>
           <button
             onClick={() => void handleImport()}
