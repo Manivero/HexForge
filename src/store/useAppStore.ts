@@ -18,6 +18,7 @@ import {
   diffSnapshots as ipcDiffSnapshots,
   cancelNode as ipcCancelNode,
   exportRecipe as ipcExportRecipe,
+  exportCyberChefRecipe as ipcExportCyberChefRecipe,
   importRecipe as ipcImportRecipe,
   listPlugins as ipcListPlugins,
   installPlugin as ipcInstallPlugin,
@@ -146,6 +147,7 @@ interface DataSlice {
   jumpToSnapshot: (snapshotId: SnapshotId) => Promise<void>;
   /** Экспорт текущего графа в файл рецепта (FR-7.1) */
   exportRecipe: (targetPath: string) => Promise<boolean>;
+  exportCyberChefRecipe: (targetPath: string) => Promise<{ content: string; warnings: string[] } | null>;
   /** Импорт графа из файла рецепта, показывает missingOperations (FR-7.1/4.2) */
   importRecipe: (sourcePath: string) => Promise<boolean>;
 }
@@ -616,17 +618,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return false;
     }
   },
+  exportCyberChefRecipe: async (targetPath: string) => {
+    try {
+      const resp = await ipcExportCyberChefRecipe({
+        graph: { nodes: get().nodes },
+        targetPath,
+      });
+      set({ runError: null });
+      return resp;
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
+      return null;
+    }
+  },
   importRecipe: async (sourcePath) => {
     try {
       const resp = await ipcImportRecipe({ sourcePath });
-      const missing = resp.missingOperations;
+      const missing = resp.missingOperations ?? [];
+      const missingPlugins = resp.missingPlugins ?? [];
+      const problems: string[] = [];
       if (missing.length > 0) {
-        set({
-          runError: t(get().locale, "app.missingOps", { ops: missing.join(", ") }),
-        });
-      } else {
-        set({ runError: null });
+        problems.push(t(get().locale, "app.missingOps", { ops: missing.join(", ") }));
       }
+      if (missingPlugins.length > 0) {
+        problems.push(
+          t(get().locale, "app.missingPlugins", {
+            plugins: missingPlugins.map((p) => `${p.id}@${p.version}`).join(", "),
+          }),
+        );
+      }
+      set({ runError: problems.length > 0 ? problems.join(" | ") : null });
       set((s) => ({
         nodes: resp.graph.nodes as Record<string, OperationNodeDto>,
         selectedNodeId: null,

@@ -76,9 +76,10 @@ fn lifecycle_install_grant_execute() {
     let manifest = example_manifest();
     let (instance, _) = install_signed(&runtime, &wasm_path, &manifest);
 
-    // Legacy core module: metadata comes from the manifest fallback.
+    // Legacy core module: metadata comes from the manifest fallback
+    // (still under the canonical `plugin:` namespace).
     let transform = runtime.clone().as_transform(instance).unwrap();
-    assert_eq!(transform.id(), "example.uppercase");
+    assert_eq!(transform.id(), "plugin:example.uppercase");
     assert_eq!(transform.version(), "1.0.0");
 
     let out = transform

@@ -659,7 +659,7 @@ fn constant_time_eq_hex(a: &str, b: &str) -> bool {
 /// Effective local grants: intersection with the signed `requested` set and
 /// the local policy. Corrupt entries (blank/unknown) are dropped, never
 /// promoted.
-fn effective_grants(manifest: &PluginManifest, granted: &[String]) -> Vec<String> {
+pub(crate) fn effective_grants(manifest: &PluginManifest, granted: &[String]) -> Vec<String> {
     granted
         .iter()
         .filter(|g| !g.trim().is_empty())
@@ -673,7 +673,7 @@ fn effective_grants(manifest: &PluginManifest, granted: &[String]) -> Vec<String
 
 /// Reads the local grants file: missing = legacy/empty (no local state yet),
 /// present-but-unreadable = corruption signal for the caller.
-fn read_grants_file(path: &Path) -> Result<Vec<String>, String> {
+pub(crate) fn read_grants_file(path: &Path) -> Result<Vec<String>, String> {
     match std::fs::read(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(format!("cannot read grants.json: {e}")),
@@ -689,6 +689,20 @@ fn read_grants_file(path: &Path) -> Result<Vec<String>, String> {
             Ok(file.granted)
         }
     }
+}
+
+/// Effective grants re-read from the package's on-disk `grants.json` for a
+/// WASM path, clamped to request ∩ policy. Used by the execution path so a
+/// grant/revoke between install and run is honored without restart.
+/// Unreadable state yields no grants (fail-closed for privileged caps;
+/// privilege-free plugins are unaffected).
+pub(crate) fn live_effective_grants(manifest: &PluginManifest, wasm_path: &str) -> Vec<String> {
+    let disk = std::path::Path::new(wasm_path)
+        .parent()
+        .map(|dir| read_grants_file(&dir.join(GRANTS_FILENAME)))
+        .unwrap_or(Ok(Vec::new()))
+        .unwrap_or_default();
+    effective_grants(manifest, &disk)
 }
 
 /// Storage-safety on top of `validate_manifest`'s charset: the id becomes a

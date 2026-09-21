@@ -111,6 +111,13 @@ pub trait Transform: Send + Sync {
 
     fn capabilities(&self) -> TransformCapabilities;
 
+    /// Operation origin for the UI palette and recipe metadata:
+    /// `"builtin"` by default, `"plugin"` for WASM plugin transforms.
+    /// A default body keeps every existing `Transform` impl compiling.
+    fn origin(&self) -> &'static str {
+        "builtin"
+    }
+
     /// Разовое (не потоковое) выполнение над полным буфером.
     fn apply<'a>(
         &self,

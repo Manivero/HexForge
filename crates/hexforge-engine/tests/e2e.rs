@@ -78,7 +78,10 @@ fn e2e_graph_via_dto_and_validate() {
             inputs: vec![a.to_string()],
         },
     );
-    let dto = GraphDto { nodes };
+    let dto = GraphDto {
+        nodes,
+        required_plugins: Vec::new(),
+    };
     let graph = validate_graph(dto.clone(), &registry).unwrap();
     assert_eq!(graph.nodes.len(), 2);
     assert!(graph.topo_order().is_ok());
@@ -201,7 +204,10 @@ fn e2e_recipe_export_import_roundtrip() {
             inputs: vec![a.to_string()],
         },
     );
-    let dto = GraphDto { nodes };
+    let dto = GraphDto {
+        nodes,
+        required_plugins: Vec::new(),
+    };
     let json = serde_json::to_string(&dto).unwrap();
     let dto2: GraphDto = serde_json::from_str(&json).unwrap();
     let g = validate_graph(dto2, &registry).unwrap();
@@ -314,7 +320,7 @@ fn e2e_plugin_host_via_transform() {
     let nid = NodeId::new_v4();
     state.graph.write().insert_node(OperationNode {
         id: nid,
-        operation_id: "e2e.uppercase".into(),
+        operation_id: "plugin:e2e.uppercase".into(),
         operation_version: "1.0.0".into(),
         params: serde_json::json!({ "sourceHandle": h.to_string() }),
         inputs: vec![],
@@ -356,8 +362,8 @@ fn e2e_wit_component_via_scheduler() {
         signature_hex: String::new(),
     };
     let transform = runtime.as_transform(instance).unwrap();
-    // WIT identity wins over the manifest fallback.
-    assert_eq!(transform.id(), "comp.uppercase");
+    // WIT identity wins over the manifest fallback (canonical plugin namespace).
+    assert_eq!(transform.id(), "plugin:comp.uppercase");
     assert_eq!(transform.version(), "1.0.0");
     let registry = hexforge_ops::build_registry();
     let leaked: Box<dyn hexforge_core::Transform> = Box::new(transform);
@@ -374,7 +380,7 @@ fn e2e_wit_component_via_scheduler() {
     let nid = NodeId::new_v4();
     state.graph.write().insert_node(OperationNode {
         id: nid,
-        operation_id: "comp.uppercase".into(),
+        operation_id: "plugin:comp.uppercase".into(),
         operation_version: "1.0.0".into(),
         params: serde_json::json!({ "sourceHandle": h.to_string() }),
         inputs: vec![],
