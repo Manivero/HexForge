@@ -1,5 +1,11 @@
 import * as React from "react";
-import { asParamsObject, extractFields, type SchemaField } from "@/lib/schemaForm";
+import {
+  asParamsObject,
+  extractFields,
+  validateParams,
+  type SchemaField,
+  type ValidationError,
+} from "@/lib/schemaForm";
 import { useAppStore } from "@/store/useAppStore";
 
 /**
@@ -38,19 +44,42 @@ export function InspectorPanel() {
   }
 
   const params = asParamsObject(node.params);
+  const validation = React.useMemo(
+    () =>
+      operation
+        ? validateParams(operation.paramsSchema, params)
+        : { valid: true, errors: [] as ValidationError[] },
+    [operation, params],
+  );
+  const validationErrors = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const err of validation.errors) map.set(err.field, err.message);
+    return map;
+  }, [validation]);
 
   const renderField = (field: SchemaField) => {
     const value = params[field.name];
     const effective = value !== undefined ? value : field.defaultValue;
+    const fieldError = validationErrors.get(field.name);
+
+    const labelText = field.required ? `${field.name} *` : field.name;
 
     const label = (
       <label
         htmlFor={`param-${field.name}`}
         className="text-2xs uppercase tracking-wide text-text-muted"
       >
-        {field.name}
+        {labelText}
       </label>
     );
+
+    const description = field.description ? (
+      <span className="text-3xs text-text-muted/70">{field.description}</span>
+    ) : null;
+
+    const errorText = fieldError ? (
+      <span className="text-3xs text-red-500">{fieldError}</span>
+    ) : null;
 
     if (field.enumValues.length > 0) {
       const current = typeof effective === "string" ? effective : (field.enumValues[0] ?? "");
@@ -73,6 +102,8 @@ export function InspectorPanel() {
               </option>
             ))}
           </select>
+          {description}
+          {errorText}
         </div>
       );
     }
@@ -89,6 +120,8 @@ export function InspectorPanel() {
             className="h-3.5 w-3.5 accent-[var(--accent-9)]"
           />
           {label}
+          {description}
+          {errorText}
         </div>
       );
     }
@@ -117,6 +150,8 @@ export function InspectorPanel() {
               "font-mono text-xs text-text-primary outline-none focus:border-border-focus",
             ].join(" ")}
           />
+          {description}
+          {errorText}
         </div>
       );
     }
@@ -136,6 +171,8 @@ export function InspectorPanel() {
             "font-mono text-xs text-text-primary outline-none focus:border-border-focus",
           ].join(" ")}
         />
+        {description}
+        {errorText}
       </div>
     );
   };
@@ -151,7 +188,21 @@ export function InspectorPanel() {
       {fields.length === 0 ? (
         <p className="text-xs text-text-muted">У операции нет параметров.</p>
       ) : (
-        <div className="flex flex-col gap-3">{fields.map(renderField)}</div>
+        <div className="flex flex-col gap-3">
+          {fields.map(renderField)}
+          {validation.errors.length > 0 && (
+            <div className="mt-2 rounded-md border border-red-500/30 bg-red-500/10 p-2">
+              <p className="text-xs text-red-400">
+                {validation.errors.length} validation error(s):
+              </p>
+              <ul className="mt-1 list-inside list-disc text-3xs text-red-400/80">
+                {validation.errors.map((err, i) => (
+                  <li key={i}>{err.message}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </section>
   );
