@@ -260,6 +260,16 @@ export interface RevokeCapabilityRequest {
   capability: PluginCapability;
 }
 
+// ---------- streaming export (FR-5.4) ----------
+export interface ExportOutputRequest {
+  handle: SourceHandle;
+  targetPath: string;
+}
+
+export interface ExportOutputResponse {
+  bytesWritten: number;
+}
+
 // ---------- events ----------
 export interface OpProgressEvent {
   nodeId: NodeId;

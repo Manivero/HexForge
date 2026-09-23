@@ -10,6 +10,8 @@ import type {
   DiffSnapshotsResponse,
   ExportCyberChefRecipeRequest,
   ExportCyberChefRecipeResponse,
+  ExportOutputRequest,
+  ExportOutputResponse,
   ExportRecipeRequest,
   GraphDto,
   GrantCapabilityRequest,
@@ -121,6 +123,10 @@ export function exportCyberChefRecipe(
 
 export function exportRecipe(req: ExportRecipeRequest): Promise<void> {
   return call<void>("export_recipe", { req });
+}
+
+export function exportOutput(req: ExportOutputRequest): Promise<number> {
+  return call<ExportOutputResponse>("export_output", { req }).then(r => r.bytesWritten);
 }
 
 export function importRecipe(req: ImportRecipeRequest): Promise<ImportRecipeResponse> {

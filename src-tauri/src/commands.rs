@@ -241,6 +241,49 @@ pub struct ReleaseSourceRequest {
 }
 
 #[tauri::command]
+pub fn export_output(
+    req: ExportOutputRequest,
+    state: State<Arc<AppState>>,
+) -> HexForgeResult<ExportOutputResponse> {
+    export_output_inner(state.inner(), req)
+}
+
+fn export_output_inner(
+    state: &AppState,
+    req: ExportOutputRequest,
+) -> HexForgeResult<ExportOutputResponse> {
+    use std::io::Write;
+    let handle = parse_handle(&req.handle)?;
+    let sources = state.sources.read();
+    let entry = sources.get(&handle).ok_or_else(|| {
+        HexForgeError::invalid_input(format!("unknown source handle: {}", req.handle))
+    })?;
+
+    const CHUNK_SIZE: usize = 64 * 1024 * 1024; // 64 MB
+    let bytes = entry.as_bytes();
+    let total = bytes.len();
+
+    let mut file = std::fs::File::create(&req.target_path).map_err(|e| {
+        HexForgeError::internal(format!("cannot create '{}': {e}", req.target_path))
+    })?;
+
+    let mut written: usize = 0;
+    while written < total {
+        let end = (written + CHUNK_SIZE).min(total);
+        file.write_all(&bytes[written..end])
+            .map_err(|e| HexForgeError::internal(format!("write @{written}: {e}")))?;
+        written = end;
+    }
+
+    file.flush()
+        .map_err(|e| HexForgeError::internal(format!("flush: {e}")))?;
+
+    Ok(ExportOutputResponse {
+        bytes_written: written,
+    })
+}
+
+#[tauri::command]
 pub fn release_source(req: ReleaseSourceRequest, state: State<Arc<AppState>>) -> bool {
     match parse_handle(&req.handle) {
         Ok(handle) => state.sources.write().release(&handle),
@@ -536,6 +579,20 @@ pub fn cancel_node(req: CancelNodeRequest, state: State<Arc<AppState>>) -> bool 
 pub struct ExportRecipeRequest {
     pub graph: GraphDto,
     pub target_path: String,
+}
+
+// ---------- Streaming export (FR-5.4) ----------
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOutputRequest {
+    pub handle: String,
+    pub target_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOutputResponse {
+    pub bytes_written: usize,
 }
 
 // ---------- Time-Travel (FR-4) ----------
@@ -2560,7 +2617,9 @@ mod plugin_recipe_tests {
         let path = tmp_file("cc-export-fork");
         let err = cyberchef_export(
             &state,
-            [(k_s, n_s), (k_f, n_f), (k_a, n_a), (k_b, n_b)].into_iter().collect(),
+            [(k_s, n_s), (k_f, n_f), (k_a, n_a), (k_b, n_b)]
+                .into_iter()
+                .collect(),
             path.clone(),
         )
         .unwrap_err();
@@ -2577,7 +2636,8 @@ mod plugin_recipe_tests {
         let m = NodeId::new_v4();
         let (k_s, n_s) = cyberchef_node_dto(&s, "input.file", vec![]);
         let (k_a, n_a) = cyberchef_node_dto(&a, "encoding.base64.encode", vec![k_s.clone()]);
-        let (k_m, n_m) = cyberchef_node_dto(&m, "encoding.hex.encode", vec![k_s.clone(), k_a.clone()]);
+        let (k_m, n_m) =
+            cyberchef_node_dto(&m, "encoding.hex.encode", vec![k_s.clone(), k_a.clone()]);
         let path = tmp_file("cc-export-merge");
         let err = cyberchef_export(
             &state,
@@ -2620,17 +2680,49 @@ mod plugin_recipe_tests {
     fn export_empty_graph_is_rejected() {
         let state = AppState::new(hexforge_ops::build_registry());
         let path = tmp_file("cc-export-empty");
-        let err = cyberchef_export(
-            &state,
-            std::collections::HashMap::new(),
-            path.clone(),
-        )
-        .unwrap_err();
+        let err =
+            cyberchef_export(&state, std::collections::HashMap::new(), path.clone()).unwrap_err();
         let msg = format!("{:?}", err);
-        assert!(
-            msg.contains("source"),
-            "expected source error, got: {msg}"
-        );
+        assert!(msg.contains("source"), "expected source error, got: {msg}");
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn export_output_writes_source_to_disk() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let handle = state
+            .sources
+            .write()
+            .insert(SourceEntry::InMemory(b"Hello, FR-5.4!".to_vec()));
+
+        let temp = std::env::temp_dir().join("hexforge_export_test.bin");
+        let path_str = temp.to_str().unwrap().to_string();
+
+        let resp = export_output_inner(
+            &state,
+            ExportOutputRequest {
+                handle: handle.to_string(),
+                target_path: path_str.clone(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(resp.bytes_written, 14);
+        let written = std::fs::read(&temp).unwrap();
+        assert_eq!(written, b"Hello, FR-5.4!");
+        let _ = std::fs::remove_file(&temp);
+    }
+
+    #[test]
+    fn export_output_unknown_handle_errors() {
+        let state = AppState::new(hexforge_ops::build_registry());
+        let result = export_output_inner(
+            &state,
+            ExportOutputRequest {
+                handle: "nonexistent".into(),
+                target_path: "out.bin".into(),
+            },
+        );
+        assert!(result.is_err());
     }
 }

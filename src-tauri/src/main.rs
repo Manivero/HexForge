@@ -113,6 +113,7 @@ fn main() {
             commands::diff_snapshots,
             commands::import_cyberchef_recipe,
             commands::export_cyberchef_recipe,
+            commands::export_output,
             commands::list_plugins,
             commands::install_plugin,
             commands::grant_capability,

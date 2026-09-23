@@ -80,6 +80,8 @@ export function App() {
   }, [locale, exportRecipe]);
 
   const exportCyberChefRecipe = useAppStore((s) => s.exportCyberChefRecipe);
+  const exportOutput = useAppStore((s) => s.exportOutput);
+  const lastRun = useAppStore((s) => s.lastRun);
   const handleExportCyberChef = React.useCallback(async () => {
     const path = window.prompt(t(locale, "app.exportCyberChefPrompt"), "recipe.cyberchef.json");
     if (!path) return;
@@ -90,6 +92,16 @@ export function App() {
       );
     }
   }, [locale, exportCyberChefRecipe]);
+
+  const handleExportOutput = React.useCallback(async () => {
+    if (!lastRun) return;
+    const path = window.prompt(t(locale, "app.exportOutputPrompt"), "output.bin");
+    if (!path) return;
+    const written = await exportOutput(lastRun.outputHandle, path);
+    if (written !== null) {
+      window.alert(t(locale, "app.exportOutputDone", { size: written.toString() }));
+    }
+  }, [locale, exportOutput, lastRun]);
 
   const handleImport = React.useCallback(async () => {
     const path = window.prompt(t(locale, "app.importPrompt"), "recipe.hexforge");
@@ -118,6 +130,13 @@ export function App() {
             aria-label="export cyberchef recipe"
           >
             {t(locale, "app.exportCyberChef")}
+          </button>
+          <button
+            onClick={() => void handleExportOutput()}
+            className="rounded border border-border-subtle px-2 py-0.5 text-2xs hover:border-border-focus hover:text-accent"
+            aria-label="export output to file"
+          >
+            {t(locale, "app.exportOutput")}
           </button>
           <button
             onClick={() => void handleImport()}

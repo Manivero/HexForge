@@ -19,6 +19,7 @@ import {
   cancelNode as ipcCancelNode,
   exportRecipe as ipcExportRecipe,
   exportCyberChefRecipe as ipcExportCyberChefRecipe,
+  exportOutput as ipcExportOutput,
   importRecipe as ipcImportRecipe,
   listPlugins as ipcListPlugins,
   installPlugin as ipcInstallPlugin,
@@ -156,6 +157,8 @@ interface DataSlice {
   /** Экспорт текущего графа в файл рецепта (FR-7.1) */
   exportRecipe: (targetPath: string) => Promise<boolean>;
   exportCyberChefRecipe: (targetPath: string) => Promise<{ content: string; warnings: string[] } | null>;
+  /** Экспорт результата выполнения на диск (FR-5.4) */
+  exportOutput: (handle: SourceHandle, targetPath: string) => Promise<number | null>;
   /** Импорт графа из файла рецепта, показывает missingOperations (FR-7.1/4.2) */
   importRecipe: (sourcePath: string) => Promise<boolean>;
 }
@@ -693,6 +696,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       set({ runError: null });
       return resp;
+    } catch (err) {
+      set({ runError: formatIpcError(err) });
+      return null;
+    }
+  },
+  exportOutput: async (handle, targetPath) => {
+    try {
+      const written = await ipcExportOutput({ handle, targetPath });
+      set({ runError: null });
+      return written;
     } catch (err) {
       set({ runError: formatIpcError(err) });
       return null;
