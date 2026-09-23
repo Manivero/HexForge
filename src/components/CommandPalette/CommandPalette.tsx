@@ -10,7 +10,7 @@ import {
 import { useAppStore } from "@/store/useAppStore";
 import { greet } from "@/lib/ipc";
 import { fuzzyMatch } from "@/lib/fuzzyMatch";
-import { buildAppCommands, operationsToCommands, type PaletteCommand } from "./commands";
+import { buildAppCommands, operationsToCommands, parseInlineArgs, stripInlineArgs, type PaletteCommand } from "./commands";
 
 const GROUP_LABELS: Record<PaletteCommand["groupId"], string> = {
   app: "Application",
@@ -91,8 +91,8 @@ export function CommandPalette() {
           .catch((err) => setBridgeStatus(`Bridge error: ${String(err)}`));
       },
     });
-    const opCommands = operationsToCommands(operations, (operation) => {
-      addOperationNode(operation);
+    const opCommands = operationsToCommands(operations, (operation, params) => {
+      addOperationNode(operation, params);
       closePalette();
     });
     return [...appCommands, ...opCommands];
@@ -111,12 +111,20 @@ export function CommandPalette() {
     return allCommands
       .map((cmd) => ({
         cmd,
-        ...fuzzyMatch(query, `${cmd.label} ${cmd.keywords?.join(" ") ?? ""}`),
+        ...fuzzyMatch(stripInlineArgs(query), `${cmd.label} ${cmd.keywords?.join(" ") ?? ""}`),
       }))
       .filter((r) => r.matched)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.cmd);
   }, [allCommands, query]);
+
+  const parsedArgs = React.useMemo(() => parseInlineArgs(query), [query]);
+
+  const inlineHint = React.useMemo(() => {
+    if (Object.keys(parsedArgs).length === 0) return null;
+    const hintParts = Object.entries(parsedArgs).map(([k, v]) => `${k}=${v}`);
+    return `⚡ ${hintParts.join(", ")}`;
+  }, [parsedArgs]);
 
   const grouped = React.useMemo(() => {
     const groups = new Map<PaletteCommand["groupId"], PaletteCommand[]>();
@@ -151,11 +159,19 @@ export function CommandPalette() {
                 key={cmd.id}
                 value={cmd.id}
                 onSelect={() => {
-                  void cmd.run();
+                  void cmd.run(parsedArgs);
                 }}
               >
                 <span>{cmd.label}</span>
-                {cmd.hint && <span className="text-2xs text-text-muted">{cmd.hint}</span>}
+                {inlineHint && cmd.groupId === "operations" && (
+                  <span className="text-2xs text-accent">{inlineHint}</span>
+                )}
+                {cmd.hint && !inlineHint && cmd.groupId === "operations" && (
+                  <span className="text-2xs text-text-muted">{cmd.hint}</span>
+                )}
+                {cmd.hint && cmd.groupId !== "operations" && (
+                  <span className="text-2xs text-text-muted">{cmd.hint}</span>
+                )}
               </CommandItem>
             ))}
           </CommandGroup>

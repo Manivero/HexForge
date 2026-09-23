@@ -8,13 +8,13 @@ export interface PaletteCommand {
   label: string;
   hint?: string;
   keywords?: string[];
-  run: () => void | Promise<void>;
+  /** Inline args hint shown when query contains "/" (FR-2.4). */
+  argsHint?: string;
+  /** Callback receives optional parsed inline args. */
+  run: (params?: Record<string, unknown>) => void | Promise<void>;
 }
 
-/** Статические команды приложения (не операции) — навигация, тема, greet-тест
- * моста IPC. Палитра дублирует ЛЮБУЮ навигацию приложения, панели вторичны
- * (см. FR-2.5, 03-INFORMATION-ARCHITECTURE.md §1). Список растёт по мере
- * добавления панелей (History, Plugins, Files) в последующих срезах. */
+/** Static application commands (FR-2.5). */
 export interface AppActions {
   toggleTheme: () => void;
   runGreetTest: () => void;
@@ -30,7 +30,7 @@ export function buildAppCommands(actions: AppActions): PaletteCommand[] {
       label: "Toggle Theme",
       hint: "Dark / Light",
       keywords: ["theme", "dark", "light", "appearance"],
-      run: actions.toggleTheme,
+      run: () => actions.toggleTheme(),
     },
     {
       id: "app.verify-bridge",
@@ -38,7 +38,7 @@ export function buildAppCommands(actions: AppActions): PaletteCommand[] {
       label: "Verify Rust Bridge (greet)",
       hint: "Sanity-check IPC",
       keywords: ["greet", "bridge", "ipc", "health", "ping"],
-      run: actions.runGreetTest,
+      run: () => actions.runGreetTest(),
     },
     {
       id: "app.clear-graph",
@@ -46,7 +46,7 @@ export function buildAppCommands(actions: AppActions): PaletteCommand[] {
       label: "Clear Graph",
       hint: "Remove all nodes",
       keywords: ["clear", "graph", "reset", "nodes"],
-      run: actions.clearGraph,
+      run: () => actions.clearGraph(),
     },
     {
       id: "app.delete-selected",
@@ -54,16 +54,15 @@ export function buildAppCommands(actions: AppActions): PaletteCommand[] {
       label: "Delete Selected Node",
       hint: "Bridge children to parent",
       keywords: ["delete", "node", "remove", "selected"],
-      run: actions.deleteSelectedNode,
+      run: () => actions.deleteSelectedNode(),
     },
   ];
 }
 
-/** Маппинг операций реестра в команды палитры — FR-2.3: добавление операции
- * в граф прямо из палитры создаёт узел, подключённый к текущему выделенному. */
+/** Maps operation descriptors to palette commands (FR-2.3). */
 export function operationsToCommands(
   operations: OperationDescriptor[],
-  onSelect: (operation: OperationDescriptor) => void,
+  onSelect: (operation: OperationDescriptor, params?: Record<string, unknown>) => void,
 ): PaletteCommand[] {
   return operations.map((op) => ({
     id: `op.${op.id}`,
@@ -72,6 +71,53 @@ export function operationsToCommands(
     hint: op.origin === "plugin" ? `${op.category} • plugin` : op.category,
     keywords:
       op.origin === "plugin" ? [op.category, op.id, "plugin"] : [op.category, op.id],
-    run: () => onSelect(op),
+    run: (params?: Record<string, unknown>) => onSelect(op, params),
   }));
+}
+
+/** Parses inline arguments from query using "/" syntax (FR-2.4).
+ *
+ * Examples:
+ *   "base64 decode / alphabet = url_safe" → { alphabet: "url_safe" }
+ *   "xor / key = abc"                     → { key: "abc" }
+ *   "gzip / level = 9, fast = true"       → { level: "9", fast: "true" }
+ *
+ * Only string values are supported (numbers/booleans are coerced by backend).
+ */
+export function parseInlineArgs(query: string): Record<string, string> {
+  const args: Record<string, string> = {};
+  const slashIdx = query.indexOf("/");
+  if (slashIdx === -1) return args;
+
+  const argsPart = query.slice(slashIdx + 1).trim();
+  if (argsPart.length === 0) return args;
+
+  // Split by comma or semicolon, each segment is "key = value"
+  const segments = argsPart.split(/[,;]/);
+  for (const segment of segments) {
+    const eqIdx = segment.indexOf("=");
+    if (eqIdx === -1) continue;
+    const key = segment.slice(0, eqIdx).trim();
+    const value = segment.slice(eqIdx + 1).trim();
+    if (key.length > 0 && value.length > 0) {
+      args[key] = value;
+    }
+  }
+  return args;
+}
+
+/** Strips inline arguments from query for fuzzy matching (FR-2.4).
+ *
+ * "base64 decode / alphabet = url_safe" → "base64 decode"
+ */
+export function stripInlineArgs(query: string): string {
+  const slashIdx = query.indexOf("/");
+  if (slashIdx === -1) return query;
+  return query.slice(0, slashIdx).trim();
+}
+
+/** Formats parsed args back to inline syntax for display. */
+export function formatInlineArgs(args: Record<string, string>): string {
+  const parts = Object.entries(args).map(([k, v]) => `${k} = ${v}`);
+  return parts.join(", ");
 }

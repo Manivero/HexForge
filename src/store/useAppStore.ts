@@ -76,7 +76,7 @@ interface GraphSlice {
   selectNode: (nodeId: string | null) => void;
   /** Добавляет узел операции, подключённый к текущему выделенному узлу
    * (или создаёт корень, если граф пуст) — прямая реализация FR-2.3. */
-  addOperationNode: (operation: OperationDescriptor) => string;
+  addOperationNode: (operation: OperationDescriptor, params?: Record<string, unknown>) => string;
   /** Мерджит patch в params выбранного/указанного узла (FR-3.2:
    * форма параметров InspectorPanel) и планирует debounced set_graph. */
   updateNodeParams: (nodeId: string, patch: Record<string, unknown>) => void;
@@ -252,14 +252,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
   nodes: {},
   selectedNodeId: null,
   selectNode: (nodeId) => set({ selectedNodeId: nodeId }),
-  addOperationNode: (operation) => {
+  addOperationNode: (operation, inlineParams) => {
     const id = newNodeId();
     const { selectedNodeId, nodes } = get();
+    const params: Record<string, unknown> = {};
+    if (inlineParams) {
+      for (const [k, v] of Object.entries(inlineParams)) {
+        params[k] = v;
+      }
+    }
     const node: OperationNodeDto = {
       id,
       operationId: operation.id,
       operationVersion: operation.version,
-      params: {},
+      params,
       inputs: selectedNodeId && nodes[selectedNodeId] ? [selectedNodeId] : [],
     };
     set((s) => ({
