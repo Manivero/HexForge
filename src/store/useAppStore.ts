@@ -111,6 +111,14 @@ interface DataSlice {
   previewHex: string | null;
   /** true, если показаны не все байты результата (лимит окна превью). */
   previewTruncated: boolean;
+  /** Показать memory warning диалог перед запуском (FR-5.3). */
+  memoryWarning: { sizeMb: number; operationId: string } | null;
+  /** Проверяет memory cost операции и устанавливает memoryWarning если нужно. */
+  checkMemoryWarning: (nodeId: string) => boolean;
+  confirmMemoryWarning: () => void;
+  cancelMemoryWarning: () => void;
+  /** Запускает узел с предварительной проверкой memory cost (FR-5.3). */
+  runSelectedNode: () => void;
   /** Постраничный HexViewer: смещение и байты текущей страницы. */
   hexOffset: number | null;
   hexBytes: Uint8Array | null;
@@ -140,7 +148,7 @@ interface DataSlice {
   staleNodeIds: NodeId[];
   applyServerStale: (ids: NodeId[]) => void;
   runError: string | null;
-  runSelectedNode: () => Promise<void>;
+  runSelectedNodeBase: () => Promise<void>;
   /** Кооперативная отмена текущего запуска (cancel_node): планировщик
    * завершит цепочку ошибкой Cancelled на ближайшем чекпоинте. */
   cancelRunningNode: () => Promise<void>;
@@ -284,6 +292,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       previewText: null,
       previewHex: null,
       previewTruncated: false,
+      memoryWarning: null,
     }));
     scheduleBackendSync(get());
   },
@@ -351,6 +360,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         previewText: null,
         previewHex: null,
         previewTruncated: false,
+        memoryWarning: null,
         hexOffset: null,
         hexBytes: null,
       });
@@ -404,6 +414,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   previewText: null,
   previewHex: null,
   previewTruncated: false,
+  memoryWarning: null,
   hexOffset: null,
   hexBytes: null,
   hexLoading: false,
@@ -415,7 +426,57 @@ export const useAppStore = create<AppStore>((set, get) => ({
   diffError: null,
   staleNodeIds: [],
   runError: null,
-  runSelectedNode: async () => {
+  checkMemoryWarning: (nodeId: string): boolean => {
+    const node = get().nodes[nodeId];
+    if (!node) return false;
+    const operation = get().operations.find((o) => o.id === node.operationId);
+    if (!operation) return false;
+    if (operation.capabilities.memoryCost !== "full_buffer") return false;
+    const sourceSize = get().sourceSizeBytes ?? 0;
+    if (sourceSize < 1024 * 1024) return false;
+    const sizeMb = Math.round(sourceSize / (1024 * 1024));
+    set({ memoryWarning: { sizeMb, operationId: operation.id } });
+    return true;
+  },
+
+  confirmMemoryWarning: () => {
+    set({ memoryWarning: null });
+    const nodeId = get().selectedNodeId;
+    if (!nodeId) return;
+    set({ runningNodeId: nodeId, runError: null });
+    void (async () => {
+      try {
+        await get().syncGraphToBackend();
+        await get().runSelectedNodeBase();
+      } catch (err) {
+        set({ runningNodeId: null, runError: formatIpcError(err) });
+      }
+    })();
+  },
+
+  cancelMemoryWarning: () => {
+    set({ memoryWarning: null });
+  },
+
+  runSelectedNode: () => {
+    const nodeId = get().selectedNodeId;
+    if (!nodeId) {
+      set({ runError: t(get().locale, "app.selectNodeForRun") });
+      return;
+    }
+    if (get().checkMemoryWarning(nodeId)) return;
+    set({ runningNodeId: nodeId, runError: null });
+    void (async () => {
+      try {
+        await get().syncGraphToBackend();
+        await get().runSelectedNodeBase();
+      } catch (err) {
+        set({ runningNodeId: null, runError: formatIpcError(err) });
+      }
+    })();
+  },
+
+  runSelectedNodeBase: async () => {
     const nodeId = get().selectedNodeId;
     if (!nodeId) {
       set({ runError: t(get().locale, "app.selectNodeForRun") });

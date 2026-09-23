@@ -8,6 +8,7 @@ import { PluginPanel } from "@/components/PluginPanel/PluginPanel";
 import { PreviewDock } from "@/components/PreviewDock/PreviewDock";
 import { useAppStore } from "@/store/useAppStore";
 import { t } from "@/lib/i18n";
+import { MemoryWarningDialog } from "@/components/MemoryWarningDialog";
 
 /**
  * Этап 2: shell + Command Palette (⌘K) + сквозной data-поток
@@ -32,6 +33,9 @@ export function App() {
   const operationsError = useAppStore((s) => s.operationsError);
   const exportRecipe = useAppStore((s) => s.exportRecipe);
   const importRecipe = useAppStore((s) => s.importRecipe);
+  const memoryWarning = useAppStore((s) => s.memoryWarning);
+  const confirmMemoryWarning = useAppStore((s) => s.confirmMemoryWarning);
+  const cancelMemoryWarning = useAppStore((s) => s.cancelMemoryWarning);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -216,6 +220,14 @@ export function App() {
         </span>
       </div>
 
+      {memoryWarning && (
+        <MemoryWarningDialog
+          sizeMb={memoryWarning.sizeMb}
+          operationId={memoryWarning.operationId}
+          onCancel={cancelMemoryWarning}
+          onConfirm={confirmMemoryWarning}
+        />
+      )}
       <CommandPalette />
     </div>
   );
