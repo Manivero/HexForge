@@ -3,8 +3,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findRootId, findRootIds, layoutOrder } from "../.fe-build/graphWalk.js";
-import { removeNode } from "../.fe-build/graphMutate.js";
+import { findRootId, findRootIds, layoutOrder } from "../.fe-build/lib/graphWalk.js";
+import { removeNode } from "../.fe-build/lib/graphMutate.js";
 import { readFileSync } from "node:fs";
 
 function mk(id, inputs) {

@@ -11,7 +11,7 @@ import {
   isGranted,
   pendingCapabilities,
   pluginStatus,
-} from "../.fe-build/plugins.js";
+} from "../.fe-build/lib/plugins.js";
 
 function dto(overrides = {}) {
   return {

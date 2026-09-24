@@ -3,7 +3,7 @@
 // и не требует дополнительных dev-зависимостей (node:test из stdlib).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyMatch } from "../.fe-build/fuzzyMatch.js";
+import { fuzzyMatch } from "../.fe-build/lib/fuzzyMatch.js";
 
 test("пустой запрос матчит всё с нулевым счётом", () => {
   const r = fuzzyMatch("", "Base64 Encode");

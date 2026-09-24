@@ -8,7 +8,7 @@ import {
   toLossyUtf8,
   toHexDump,
   hexPairsToBytes,
-} from "../.fe-build/bytes.js";
+} from "../.fe-build/lib/bytes.js";
 
 test("короткий вход: один ряд с паддингом до 16 байт", () => {
   const rows = buildHexRows(new Uint8Array([0xde, 0xad]), 0);

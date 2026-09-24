@@ -1,7 +1,7 @@
 // Юнит-тесты мутаций графа (removeNode с «мостом») — скомпилированный артефакт.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bindSourceHandle, removeNode } from "../.fe-build/graphMutate.js";
+import { bindSourceHandle, removeNode } from "../.fe-build/lib/graphMutate.js";
 
 function mk(id, inputs) {
   return { id, operationId: `op.${id}`, operationVersion: "1.0.0", params: {}, inputs };
