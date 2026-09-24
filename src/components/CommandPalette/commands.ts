@@ -1,6 +1,6 @@
 import type { OperationDescriptor } from "../../lib/ipc-contract";
 
-export type CommandGroupId = "app" | "operations";
+export type CommandGroupId = "app" | "operations" | "navigation";
 
 export interface PaletteCommand {
   id: string;
@@ -55,6 +55,60 @@ export function buildAppCommands(actions: AppActions): PaletteCommand[] {
       hint: "Bridge children to parent",
       keywords: ["delete", "node", "remove", "selected"],
       run: () => actions.deleteSelectedNode(),
+    },
+  ];
+}
+
+/** Navigation commands for toggling UI panels (FR-2.5). */
+export interface NavigationActions {
+  toggleInspector: () => void;
+  toggleInput: () => void;
+  toggleHistory: () => void;
+  togglePlugins: () => void;
+  togglePreview: () => void;
+}
+
+export function buildNavigationCommands(actions: NavigationActions): PaletteCommand[] {
+  return [
+    {
+      id: "nav.toggle-inspector",
+      groupId: "navigation",
+      label: "Toggle Inspector Panel",
+      hint: "Show / hide operation parameters",
+      keywords: ["inspector", "panel", "parameters", "params", "operation", "settings"],
+      run: () => actions.toggleInspector(),
+    },
+    {
+      id: "nav.toggle-input",
+      groupId: "navigation",
+      label: "Toggle Input Panel",
+      hint: "Show / hide text input",
+      keywords: ["input", "panel", "text", "source", "data", "entry"],
+      run: () => actions.toggleInput(),
+    },
+    {
+      id: "nav.toggle-history",
+      groupId: "navigation",
+      label: "Toggle History Panel",
+      hint: "Show / hide time-travel timeline",
+      keywords: ["history", "panel", "timeline", "snapshots", "time-travel", "undo"],
+      run: () => actions.toggleHistory(),
+    },
+    {
+      id: "nav.toggle-plugins",
+      groupId: "navigation",
+      label: "Toggle Plugins Panel",
+      hint: "Show / hide installed plugins",
+      keywords: ["plugins", "panel", "extensions", "modules", "installed"],
+      run: () => actions.togglePlugins(),
+    },
+    {
+      id: "nav.toggle-preview",
+      groupId: "navigation",
+      label: "Toggle Preview Dock",
+      hint: "Show / hide hex/text preview",
+      keywords: ["preview", "dock", "output", "hex", "text", "result", "bytes"],
+      run: () => actions.togglePreview(),
     },
   ];
 }

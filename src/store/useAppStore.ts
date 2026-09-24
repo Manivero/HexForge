@@ -55,6 +55,9 @@ interface UiSlice {
   toggleTheme: () => void;
   locale: Locale;
   setLocale: (l: Locale) => void;
+  /** Видимость UI-панелей (FR-2.5) */
+  panelVisibility: Record<string, boolean>;
+  togglePanel: (panel: string) => void;
 }
 
 interface PaletteSlice {
@@ -227,6 +230,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleTheme: () => set((s) => ({ theme: s.theme === "dark" ? "light" : "dark" })),
   locale: "en",
   setLocale: (l) => set({ locale: l }),
+  // Все панели видны по умолчанию
+  panelVisibility: {
+    inspector: true,
+    input: true,
+    history: true,
+    plugins: true,
+    preview: true,
+  },
+  togglePanel: (panel) =>
+    set((s) => ({
+      panelVisibility: {
+        ...s.panelVisibility,
+        [panel]: !s.panelVisibility[panel],
+      },
+    })),
 
   // ---- palette ----
   isPaletteOpen: false,

@@ -10,11 +10,12 @@ import {
 import { useAppStore } from "@/store/useAppStore";
 import { greet } from "@/lib/ipc";
 import { fuzzyMatch } from "@/lib/fuzzyMatch";
-import { buildAppCommands, operationsToCommands, parseInlineArgs, stripInlineArgs, type PaletteCommand } from "./commands";
+import { buildAppCommands, buildNavigationCommands, operationsToCommands, parseInlineArgs, stripInlineArgs, type PaletteCommand } from "./commands";
 
 const GROUP_LABELS: Record<PaletteCommand["groupId"], string> = {
   app: "Application",
   operations: "Operations",
+  navigation: "Panels",
 };
 
 /**
@@ -34,6 +35,7 @@ export function CommandPalette() {
   const clearGraph = useAppStore((s) => s.clearGraph);
   const deleteNode = useAppStore((s) => s.deleteNode);
   const selectedForDelete = useAppStore((s) => s.selectedNodeId);
+  const togglePanel = useAppStore((s) => s.togglePanel);
 
   const [query, setQuery] = React.useState("");
   const [bridgeStatus, setBridgeStatus] = React.useState<string | null>(null);
@@ -95,9 +97,17 @@ export function CommandPalette() {
       addOperationNode(operation, params);
       closePalette();
     });
-    return [...appCommands, ...opCommands];
+    const navCommands = buildNavigationCommands({
+      toggleInspector: () => togglePanel("inspector"),
+      toggleInput: () => togglePanel("input"),
+      toggleHistory: () => togglePanel("history"),
+      togglePlugins: () => togglePanel("plugins"),
+      togglePreview: () => togglePanel("preview"),
+    });
+    return [...appCommands, ...navCommands, ...opCommands];
   }, [
     toggleTheme,
+    togglePanel,
     operations,
     addOperationNode,
     closePalette,

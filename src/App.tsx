@@ -36,6 +36,7 @@ export function App() {
   const memoryWarning = useAppStore((s) => s.memoryWarning);
   const confirmMemoryWarning = useAppStore((s) => s.confirmMemoryWarning);
   const cancelMemoryWarning = useAppStore((s) => s.cancelMemoryWarning);
+  const panelVisibility = useAppStore((s) => s.panelVisibility);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle("light", theme === "light");
@@ -213,13 +214,13 @@ export function App() {
             <GraphCanvas />
           </section>
 
-          <InspectorPanel />
+          {panelVisibility.inspector && <InspectorPanel />}
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <InputPanel />
-            <HistoryPanel />
+            {panelVisibility.input && <InputPanel />}
+            {panelVisibility.history && <HistoryPanel />}
           </div>
-          <PluginPanel />
-          <PreviewDock />
+          {panelVisibility.plugins && <PluginPanel />}
+          {panelVisibility.preview && <PreviewDock />}
 
           {(runError || operationsError) && (
             <section className="rounded-lg border border-status-error bg-surface-1 px-4 py-3">

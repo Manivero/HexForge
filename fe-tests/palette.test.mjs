@@ -2,7 +2,7 @@
 // Real import from .fe-build (compiled src), same pattern as plugins.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { operationsToCommands, parseInlineArgs, stripInlineArgs, formatInlineArgs } from "../.fe-build/components/CommandPalette/commands.js";
+import { buildNavigationCommands, operationsToCommands, parseInlineArgs, stripInlineArgs, formatInlineArgs } from "../.fe-build/components/CommandPalette/commands.js";
 
 function descriptor(overrides = {}) {
   return {
@@ -39,6 +39,53 @@ test("plugin operations get a plugin badge and keyword", () => {
   assert.equal(cmd.hint, "Plugin • plugin");
   assert.ok(cmd.keywords.includes("plugin"));
   assert.equal(cmd.label, "Example WIT Uppercase");
+});
+
+// FR-2.5 navigation tests
+test("buildNavigationCommands: creates 5 navigation commands", () => {
+  const actions = {
+    toggleInspector: () => {},
+    toggleInput: () => {},
+    toggleHistory: () => {},
+    togglePlugins: () => {},
+    togglePreview: () => {},
+  };
+  const cmds = buildNavigationCommands(actions);
+  assert.equal(cmds.length, 5);
+  assert.ok(cmds.every((c) => c.groupId === "navigation"));
+});
+
+test("buildNavigationCommands: each command has required fields", () => {
+  const actions = {
+    toggleInspector: () => {},
+    toggleInput: () => {},
+    toggleHistory: () => {},
+    togglePlugins: () => {},
+    togglePreview: () => {},
+  };
+  const cmds = buildNavigationCommands(actions);
+  for (const cmd of cmds) {
+    assert.ok(cmd.id.length > 0);
+    assert.ok(cmd.label.length > 0);
+    assert.ok(cmd.keywords && cmd.keywords.length > 0);
+    assert.equal(typeof cmd.run, "function");
+  }
+});
+
+test("buildNavigationCommands: toggleInspector calls action", () => {
+  let called = false;
+  const actions = {
+    toggleInspector: () => { called = true; },
+    toggleInput: () => {},
+    toggleHistory: () => {},
+    togglePlugins: () => {},
+    togglePreview: () => {},
+  };
+  const cmds = buildNavigationCommands(actions);
+  const inspector = cmds.find((c) => c.id === "nav.toggle-inspector");
+  assert.ok(inspector);
+  inspector?.run();
+  assert.equal(called, true);
 });
 
 // FR-2.4 inline args tests
