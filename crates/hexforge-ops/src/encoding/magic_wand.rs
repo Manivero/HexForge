@@ -139,7 +139,8 @@ fn dfs(
 }
 
 /// Список всех доступных декодеров.
-static ALL_DECODERS: &[(&str, fn(&[u8]) -> Option<Vec<u8>>)] = &[
+type DecoderFn = fn(&[u8]) -> Option<Vec<u8>>;
+static ALL_DECODERS: &[(&str, DecoderFn)] = &[
     ("hex", try_hex),
     ("base32", try_base32),
     ("base58", try_base58),

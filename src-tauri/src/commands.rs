@@ -1018,10 +1018,7 @@ fn validate_cyberchef_exportable(graph: &Graph) -> Result<(), String> {
             ));
         }
         for input_id in &node.inputs {
-            children
-                .entry(input_id.clone())
-                .or_default()
-                .push(node.id.clone());
+            children.entry(*input_id).or_default().push(node.id);
         }
     }
 
@@ -1033,7 +1030,7 @@ fn validate_cyberchef_exportable(graph: &Graph) -> Result<(), String> {
             ));
         }
     }
-    let reachable = graph.downstream_of(sources[0].id.clone());
+    let reachable = graph.downstream_of(sources[0].id);
     if reachable.len() != graph.nodes.len() {
         return Err(format!(
             "graph has {} unreachable nodes from source (not a single connected linear chain)",
