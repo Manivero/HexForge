@@ -14,7 +14,7 @@ import { MemoryWarningDialog } from "@/components/MemoryWarningDialog";
  * Этап 2: shell + Command Palette (⌘K) + сквозной data-поток
  * (05-IPC-CONTRACT.md §3) + GraphCanvas + InspectorPanel (FR-3.2) +
  * HistoryPanel Time-Travel (FR-4.1, jump_to_snapshot). ActivityBar и
- * полноценный DAG-canvas истории — следующие срезы; App остаётся тонкой
+ * следующий срез; App остаётся тонкой
  * композицией.
  */
 export function App() {
