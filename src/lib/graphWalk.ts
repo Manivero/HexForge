@@ -59,6 +59,35 @@ export function findRootIds(
   return [...roots];
 }
 
+/**
+ * Collects all nodes reachable from `nodeId` via outgoing edges
+ * (i.e. its entire downstream subtree). Used for targeted invalidation
+ * when a node's params change — downstream nodes need re-execution.
+ *
+ * Returns the set including the node itself.
+ */
+export function collectDownstream(
+  nodes: Record<string, OperationNodeDto>,
+  nodeId: string,
+): Set<string> {
+  const visited = new Set<string>();
+  const stack = [nodeId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (visited.has(id)) continue;
+    visited.add(id);
+    const node = nodes[id];
+    if (!node) continue;
+    // Find all nodes that take `id` as input (children)
+    for (const other of Object.values(nodes)) {
+      if (other.inputs.includes(id) && !visited.has(other.id)) {
+        stack.push(other.id);
+      }
+    }
+  }
+  return visited;
+}
+
 export interface LayoutNode {
   id: string;
   depth: number;

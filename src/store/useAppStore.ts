@@ -43,7 +43,7 @@ import type {
 import { applyGrantedCapability, applyRevokedCapability } from "@/lib/plugins";
 import { toHexDump, toLossyUtf8 } from "@/lib/bytes";
 import { hexPairsToBytes } from "@/lib/bytes";
-import { findRootId } from "@/lib/graphWalk";
+import { collectDownstream, findRootId } from "@/lib/graphWalk";
 import { bindSourceHandle, removeNode } from "@/lib/graphMutate";
 import { t } from "@/lib/i18n";
 
@@ -293,6 +293,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       nodes: { ...s.nodes, [id]: node },
       selectedNodeId: id,
       graphVersion: s.graphVersion + 1,
+      staleNodeIds: [...s.staleNodeIds, id, ...collectDownstream(s.nodes, id)],
     }));
     scheduleBackendSync(get());
     return id;
@@ -341,6 +342,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ...s.nodes,
         [nodeId]: { ...node, params: nextParams },
       },
+      staleNodeIds: [...s.staleNodeIds, ...collectDownstream(s.nodes, nodeId)],
     }));
     scheduleBackendSync(get());
   },
@@ -361,7 +363,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!bound) {
       return false;
     }
-    set({ nodes: bound });
+    set((s) => ({
+      nodes: bound,
+      staleNodeIds: [
+        ...s.staleNodeIds,
+        ...(rootId ? collectDownstream(s.nodes, rootId) : []),
+      ],
+    }));
     scheduleBackendSync(get());
     return true;
   },
@@ -528,7 +536,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         hexOffset: null,
         hexBytes: null,
         runningNodeId: null,
-        staleNodeIds: get().staleNodeIds.filter((id) => id !== nodeId),
+        staleNodeIds: get().staleNodeIds.filter(
+          (id) => !collectDownstream(get().nodes, nodeId).has(id),
+        ),
       });
       await loadSnapshots(set);
     } catch (err) {

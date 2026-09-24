@@ -1,7 +1,7 @@
 // Юнит-тесты чистого обхода графа (findRootId) — скомпилированный артефакт.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findRootId, layoutOrder } from "../.fe-build/graphWalk.js";
+import { collectDownstream, findRootId, layoutOrder } from "../.fe-build/lib/graphWalk.js";
 
 function chain(ids) {
   const nodes = {};
@@ -95,7 +95,7 @@ test("layoutOrder: пустой граф — пустой список", () => {
 });
 
 test("findRootIds: merge-узел с двумя корнями возвращает оба", async () => {
-  const { findRootIds } = await import("../.fe-build/graphWalk.js");
+  const { findRootIds } = await import("../.fe-build/lib/graphWalk.js");
   const nodes = {
     a: { id: "a", inputs: [] },
     b: { id: "b", inputs: [] },
@@ -106,7 +106,7 @@ test("findRootIds: merge-узел с двумя корнями возвраща�
 });
 
 test("depthOf: merge-узел глубина = max(глубин входов)+1", async () => {
-  const { layoutOrder: lo } = await import("../.fe-build/graphWalk.js");
+  const { layoutOrder: lo } = await import("../.fe-build/lib/graphWalk.js");
   const nodes = {
     a: mkN("a", []),
     b: mkN("b", []),
@@ -118,5 +118,56 @@ test("depthOf: merge-узел глубина = max(глубин входов)+1"
   const c = items.find((n) => n.id === "c");
   assert.equal(c.depth, 1);
   assert.equal(d.depth, 2);
+});
+
+// FR-1.6: collectDownstream tests
+test("collectDownstream: linear chain", () => {
+  const nodes = {
+    a: mkN("a", []),
+    b: mkN("b", ["a"]),
+    c: mkN("c", ["b"]),
+    d: mkN("d", ["c"]),
+  };
+  const ds = collectDownstream(nodes, "a");
+  assert.deepEqual(new Set(ds), new Set(["a", "b", "c", "d"]));
+});
+
+test("collectDownstream: fork (one parent, two children)", () => {
+  const nodes = {
+    root: mkN("root", []),
+    left: mkN("left", ["root"]),
+    right: mkN("right", ["root"]),
+    childL: mkN("childL", ["left"]),
+    childR: mkN("childR", ["right"]),
+  };
+  const ds = collectDownstream(nodes, "root");
+  assert.deepEqual(new Set(ds), new Set(["root", "left", "right", "childL", "childR"]));
+});
+
+test("collectDownstream: middle node returns itself + descendants only", () => {
+  const nodes = {
+    a: mkN("a", []),
+    b: mkN("b", ["a"]),
+    c: mkN("c", ["b"]),
+    d: mkN("d", ["b"]),
+  };
+  const ds = collectDownstream(nodes, "b");
+  assert.deepEqual(new Set(ds), new Set(["b", "c", "d"]));
+  assert.ok(!ds.has("a"));
+});
+
+test("collectDownstream: leaf returns itself only", () => {
+  const nodes = {
+    a: mkN("a", []),
+    b: mkN("b", ["a"]),
+  };
+  const ds = collectDownstream(nodes, "b");
+  assert.deepEqual(new Set(ds), new Set(["b"]));
+});
+
+test("collectDownstream: unknown node returns itself", () => {
+  const nodes = { a: mkN("a", []) };
+  const ds = collectDownstream(nodes, "ghost");
+  assert.deepEqual(new Set(ds), new Set(["ghost"]));
 });
 
